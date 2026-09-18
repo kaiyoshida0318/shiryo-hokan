@@ -205,7 +205,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 }
 .modal-backdrop.show { display: flex; }
 .modal { background: var(--surface); border-radius: var(--radius); max-width: 640px; width: 100%; max-height: 92vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
-.modal-lg { max-width: 1180px; height: 92vh; }
+.modal-lg { max-width: 1760px; width: 97vw; height: 94vh; }
 .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .modal-header h2 { font-size: 18px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-close { background: transparent; border: none; font-size: 24px; color: var(--text-muted); cursor: pointer; width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -255,8 +255,14 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .drop-overlay.show { display: flex; }
 
 /* ===== Detail ===== */
-.detail { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 18px; height: 100%; min-height: 0; }
+.detail { display: grid; grid-template-columns: minmax(0,1fr) 560px; gap: 18px; height: 100%; min-height: 0; }
 .detail-side { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding-right: 2px; }
+.side-top { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.replace-zone { border: 2px dashed var(--border); border-radius: var(--radius); background: var(--bg); padding: 20px 16px; text-align: center; cursor: pointer; transition: all .15s; }
+.replace-zone:hover, .replace-zone.over { border-color: var(--primary); background: var(--primary-light); }
+.replace-zone .rz-icon { font-size: 30px; }
+.replace-zone .rz-title { font-weight: 600; margin-top: 4px; font-size: 13px; }
+.replace-zone .rz-desc { font-size: 11px; color: var(--text-light); margin-top: 2px; line-height: 1.6; }
 .side-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface); }
 .side-edit { background: var(--bg); }
 .side-title { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
@@ -336,6 +342,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   .form-2col { grid-template-columns: 1fr; }
   .detail { grid-template-columns: 1fr; height: auto; }
   .detail-side { overflow: visible; }
+  .side-top { grid-template-columns: 1fr; }
   .modal-lg { height: auto; }
   .detail-main { min-height: 60vh; }
   .btn-icon .lbl { display: none; }
@@ -402,7 +409,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   <div class="content" id="catsContent"></div>
 </section>
 
-<div class="drop-overlay" id="dropOverlay">📥 ここにドロップして資料をアップ</div>
+<div class="drop-overlay" id="dropOverlay">📥 ここにドロップ（資料を開いているときは差し替え）</div>
 
 <!-- 設定モーダル -->
 <div class="modal-backdrop" id="settingsModal">
@@ -520,7 +527,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.6.0';
+const APP_VERSION = 'v1.7.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1432,6 +1439,7 @@ function renderDetailSide(d) {
   const s = d.summary || {};
   const sheets = (s.excel && s.excel.sheets) || [];
   document.getElementById('detailSide').innerHTML = `
+    <div class="side-top">
     <div class="side-block">
       <div class="side-actions">
         <button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button>
@@ -1473,6 +1481,17 @@ function renderDetailSide(d) {
       <div class="form-row"><label>タグ（カンマ区切り）</label><input type="text" id="dsTags" value="${esc((d.tags || []).join(', '))}"></div>
       <div class="form-row"><label>メモ</label><textarea id="dsMemo">${esc(d.memo || '')}</textarea></div>
       <button class="btn-add" style="width:100%" onclick="handleDetailSave()">保存</button>
+    </div>
+    </div>
+    <div class="side-block">
+      <div class="side-title">🔄 ファイルの差し替え（更新）</div>
+      <div class="replace-zone" id="replaceZone" onclick="document.getElementById('replaceInput').click()">
+        <div class="rz-icon">📥</div>
+        <div class="rz-title">新しいファイルをドラッグ＆ドロップ</div>
+        <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・タグ・メモ・履歴はそのまま引き継ぎます</div>
+      </div>
+      <input type="file" id="replaceInput" accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
+      ${(d.updates || []).length ? `<div class="dl-history" style="max-height:120px">${d.updates.slice().reverse().map(x => `<div class="dl-row">${fmtDateTime(x.at)} ${esc(x.name || '')}</div>`).join('')}</div>` : ''}
     </div>`;
   const sel = document.getElementById('dsCat'); if (sel) sel.value = d.categoryId || '';
   const us = document.getElementById('dsUser'); if (us) us.value = d.user || '';
@@ -1486,6 +1505,62 @@ function onPickSheet(name) {
   const hint = document.getElementById('dsSheetHint');
   if (hint) hint.textContent = name === saved ? '' : '「保存」を押すと、この見た目が一覧にも反映されます。';
   renderExcelTabs(d, 0);
+}
+
+// ファイルの差し替え（中身とプレビューを作り直し、情報は引き継ぐ）
+async function handleReplaceFile(file) {
+  const d = state.docs.find(x => x.id === detailId); if (!d) return;
+  const kind = kindOf(file.name);
+  if (!kind) { toast('Word / Excel のファイルを選んでください', 'error'); return; }
+  if (file.size > MAX_FILE_MB * 1024 * 1024) { toast(`${MAX_FILE_MB}MBを超えるファイルはアップできません`, 'error'); return; }
+  if (!confirm(`「${d.title}」のファイルを\n「${file.name}」に差し替えますか？\n\n前のファイルは置き換えられます（資料名・カテゴリ・タグ・メモ・ダウンロード履歴はそのまま残ります）。`)) return;
+  const backup = JSON.parse(JSON.stringify({ path: d.path, sha: d.sha, size: d.size, ext: d.ext, kind: d.kind, originalName: d.originalName, summary: d.summary, searchText: d.searchText, preview: d.preview, updatedAt: d.updatedAt, updates: d.updates || [] }));
+  showLoading('中身を読み取り中...');
+  try {
+    const analysis = await analyzeFile(file);
+    showLoading('GitHubにアップロード中...');
+    const newPath = `${DATA_DIR}/files/${d.id}/${safeFilename(file.name)}`;
+    const existing = (newPath === d.path) ? d.sha : null;
+    const content = await fileToBase64(file);
+    const body = { message: `replace: ${file.name}`, content, branch: auth.branch };
+    if (existing) body.sha = existing;
+    const res = await ghFetch(`contents/${encPath(newPath)}`, { method: 'PUT', body: JSON.stringify(body) });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || 'アップロードに失敗しました'); }
+    const newSha = (await res.json()).content.sha;
+    const oldPath = d.path, oldSha = d.sha;
+    d.path = newPath; d.sha = newSha; d.size = file.size; d.ext = extOf(file.name); d.kind = kind;
+    d.originalName = file.name; d.summary = analysis.summary; d.searchText = analysis.searchText;
+    d.updatedAt = new Date().toISOString();
+    d.updates = [...(d.updates || []), { at: d.updatedAt, name: file.name }].slice(-DL_HISTORY_MAX);
+    pvCache = { id: null, buf: null }; imgCache.delete(d.id);
+    // プレビュー画像を作り直す
+    if (analysis.previewSource) {
+      showLoading('プレビュー画像を作成中...');
+      try {
+        const img = await makePreviewImage(await file.arrayBuffer(), d.ext, analysis);
+        if (img) {
+          const ipath = (d.preview && d.preview.path) || `${DATA_DIR}/previews/${d.id}.png`;
+          const ic = await fileToBase64(new File([img.blob], 'p.png', { type: 'image/png' }));
+          const ib = { message: `preview: ${file.name}`, content: ic, branch: auth.branch };
+          if (d.preview && d.preview.sha) ib.sha = d.preview.sha;
+          const ires = await ghFetch(`contents/${encPath(ipath)}`, { method: 'PUT', body: JSON.stringify(ib) });
+          if (ires.ok) d.preview = { path: ipath, sha: (await ires.json()).content.sha, w: img.w, h: img.h, sheet: img.sheet || analysis.previewSource.name };
+        }
+      } catch (e) { console.warn('プレビュー画像の作り直しに失敗', e); }
+    } else if (d.preview) {
+      await deleteFileFromGitHub(d.preview.path, d.preview.sha); d.preview = null;
+    }
+    showLoading('保存中...');
+    await saveData(`replace: ${file.name}`);
+    if (oldPath !== newPath) await deleteFileFromGitHub(oldPath, oldSha);
+    pendingSheet = (d.preview && d.preview.sheet) || ((d.summary.excel || {}).mainSheet) || '';
+    toast('ファイルを差し替えました', 'success');
+    renderAll(); renderDetailSide(d);
+    if (d.kind === 'word') renderWordTabs(d, 0); else renderExcelTabs(d, 0);
+  } catch (e) {
+    Object.assign(d, backup);
+    toast(e.message, 'error');
+  } finally { hideLoading(); }
 }
 
 async function handleDetailSave() {
@@ -1900,11 +1975,14 @@ function userOptions(selected, withAll) {
     const files = e.dataTransfer.files;
     if (!files.length) return;
     if (document.getElementById('uploadModal').classList.contains('show')) addUploadFiles(files);
+    else if (document.getElementById('detailModal').classList.contains('show')) handleReplaceFile(files[0]);
     else openUpload(files);
   });
   const dz = document.getElementById('dropzone');
   ['dragenter', 'dragover'].forEach(t => dz.addEventListener(t, () => dz.classList.add('over')));
   ['dragleave', 'drop'].forEach(t => dz.addEventListener(t, () => dz.classList.remove('over')));
+  document.addEventListener('dragenter', e => { const z = e.target.closest && e.target.closest('#replaceZone'); if (z) z.classList.add('over'); });
+  document.addEventListener('dragleave', e => { const z = e.target.closest && e.target.closest('#replaceZone'); if (z) z.classList.remove('over'); });
 })();
 
 document.addEventListener('keydown', e => {
