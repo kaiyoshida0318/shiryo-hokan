@@ -249,6 +249,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .dropzone .dz-icon { font-size: 36px; }
 .dropzone .dz-title { font-weight: 600; margin-top: 6px; }
 .dropzone .dz-desc { font-size: 12px; color: var(--text-light); }
+.btn-cover { align-self: center; white-space: nowrap; padding: 6px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-muted); cursor: pointer; }
+.btn-cover:hover { border-color: var(--primary); color: var(--primary-dark); }
+.btn-cover.on { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
 .up-cover { display: flex; gap: 14px; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 16px; background: var(--bg); }
 .up-cover img { width: 180px; max-height: 150px; object-fit: contain; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .up-cover-info { flex: 1; min-width: 0; }
@@ -470,7 +473,6 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
         <button data-t="multi" onclick="setUpType('multi')">📚 複数資料<small>何枚かをまとめて1資料</small></button>
       </div>
       <div class="form-row" id="upTitleRow" style="display:none"><label>資料名（まとめた資料の名前）</label><input type="text" id="upTitle" placeholder="例: 2026年パッケージ一式"></div>
-      <div id="upCoverBox" style="display:none"></div>
       <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
         <div class="dz-icon">📄</div>
         <div class="dz-title">クリックしてファイルを選択／ここにドラッグ＆ドロップ</div>
@@ -544,7 +546,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.4.0';
+const APP_VERSION = 'v2.5.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -576,7 +578,6 @@ let currentTab = 'docs';
 let filterKind = 'all', filterCat = 'all', filterUser = 'all', searchText = '', sortKey = 'new', viewMode = 'card';
 let uploads = [];          // アップロード待ちファイル
 let upType = 'single';     // 'single' | 'multi'
-let upCoverFile = null;
 let editingCatId = null, detailId = null, pendingSheet = '', renameWithTitle = true;
 
 /* ==================== GitHub helpers ==================== */
@@ -2074,13 +2075,13 @@ function setUpType(t) {
   document.querySelectorAll('#upTypeSeg button').forEach(b => b.classList.toggle('active', b.dataset.t === t));
   document.getElementById('upTitleRow').style.display = t === 'multi' ? '' : 'none';
   document.getElementById('dzHint').innerHTML = t === 'multi'
-    ? '複数資料：選んだファイルは<b>1つの資料</b>にまとまります。画像をいっしょに入れると、その画像が<b>表紙</b>になります'
+    ? '複数資料：選んだファイルは<b>1つの資料</b>にまとまります。画像を入れたら、下の一覧で「表紙にする」を選べます'
     : '単一資料：ファイル1つにつき1件の資料として登録します';
   renderUploads();
 }
 function openUpload(files) {
   if (!auth.owner || !auth.repo) { toast('先に⚙️設定でGitHub保存先を登録してください', 'error'); openSettings(); return; }
-  uploads = []; upCoverFile = null; noCover = false;
+  uploads = []; upCoverKey = null; noCover = false;
   setUpType(upType);
   const t = document.getElementById('upTitle'); if (t) t.value = '';
   document.getElementById('upCat').innerHTML = catOptions(filterCat !== 'all' && filterCat !== 'none' ? filterCat : '', false);
@@ -2089,7 +2090,7 @@ function openUpload(files) {
   showModal('uploadModal');
   if (files && files.length) addUploadFiles(files);
 }
-function closeUpload() { uploads = []; upCoverFile = null; noCover = false; closeModal('uploadModal'); }
+function closeUpload() { uploads = []; upCoverKey = null; noCover = false; closeModal('uploadModal'); }
 function addUploadFiles(fileList) {
   for (const f of fileList) {
     const kind = kindOf(f.name);
@@ -2104,53 +2105,24 @@ function addUploadFiles(fileList) {
   renderUploads();
 }
 function removeUpload(key) {
-  const u = uploads.find(x => x.key === key);
-  if (u && upCoverFile === u.file) upCoverFile = null;
+  if (upCoverKey === key) upCoverKey = null;
   uploads = uploads.filter(x => x.key !== key);
   renderUploads();
 }
-// 複数資料のとき、選んだ画像を表紙プレビューとして出す
-function coverCandidate() {
-  if (noCover) return null;
-  if (upCoverFile) return upCoverFile;
-  const img = uploads.find(u => u.kind === 'image' && u.status !== 'error');
-  return img ? img.file : null;
+// 複数資料のとき、どの画像を表紙にするか（既定は最初に入れた画像）
+let upCoverKey = null, noCover = false;
+function coverItem() {
+  if (upType !== 'multi' || noCover) return null;
+  if (upCoverKey) { const u = uploads.find(x => x.key === upCoverKey); if (u) return u; }
+  return uploads.find(u => u.kind === 'image' && u.status !== 'error') || null;
 }
-let upCoverUrl = null;
-function renderUpCover() {
-  const box = document.getElementById('upCoverBox');
-  if (upType !== 'multi') { box.style.display = 'none'; box.innerHTML = ''; if (upCoverUrl) { URL.revokeObjectURL(upCoverUrl); upCoverUrl = null; } return; }
-  box.style.display = '';
-  const file = coverCandidate();
-  if (upCoverUrl) { URL.revokeObjectURL(upCoverUrl); upCoverUrl = null; }
-  if (file) {
-    upCoverUrl = URL.createObjectURL(file);
-    box.innerHTML = `<div class="up-cover">
-        <img src="${upCoverUrl}" alt="表紙プレビュー">
-        <div class="up-cover-info">
-          <div class="up-cover-title">🖼️ 表紙プレビュー</div>
-          <div class="up-sub">${esc(file.name)} · ${fmtSize(file.size)}</div>
-          <div class="up-sub">この画像が表紙になります（一覧のサムネイルにも使われます）</div>
-          <div style="margin-top:6px"><button type="button" class="btn-icon" onclick="document.getElementById('upCoverInput').click()">🔄 別の画像を選ぶ</button>
-          <button type="button" class="btn-icon" onclick="clearUpCover()">表紙にしない</button></div>
-        </div>
-      </div>`;
-  } else {
-    box.innerHTML = `<div class="replace-zone" style="margin-bottom:16px" onclick="document.getElementById('upCoverInput').click()">
-        <div class="rz-icon">🖼️</div>
-        <div class="rz-title">表紙にする画像（任意）</div>
-        <div class="rz-desc">クリックして画像を選ぶ／画像をいっしょにドロップすると自動で表紙になります</div>
-      </div>`;
-  }
-  if (!document.getElementById('upCoverInput')) {
-    const inp = document.createElement('input');
-    inp.type = 'file'; inp.id = 'upCoverInput'; inp.accept = 'image/*'; inp.style.display = 'none';
-    inp.onchange = () => { if (inp.files[0]) { upCoverFile = inp.files[0]; noCover = false; renderUploads(); } inp.value = ''; };
-    document.body.appendChild(inp);
-  }
+function coverCandidate() { const u = coverItem(); return u ? u.file : null; }
+function pickCover(key) {
+  const cur = coverItem();
+  if (cur && cur.key === key) { upCoverKey = null; noCover = true; }      // 解除
+  else { upCoverKey = key; noCover = false; }
+  renderUploads();
 }
-let noCover = false;
-function clearUpCover() { upCoverFile = null; noCover = true; renderUploads(); }
 function upSubText(u) {
   if (u.status === 'error') return `<div class="up-sub err">⚠️ ${esc(u.error)}</div>`;
   if (u.status === 'analyzing') return `<div class="up-sub">⏳ 中身を読み取り中...</div>`;
@@ -2166,7 +2138,6 @@ function upSubText(u) {
   return `<div class="up-sub">📑 ${t}</div>${dup ? `<div class="up-sub warn">⚠️ 同じファイル名の資料がすでにあります（登録日 ${fmtDate(dup.createdAt)}）</div>` : ''}`;
 }
 function renderUploads() {
-  renderUpCover();
   const el = document.getElementById('upList');
   el.innerHTML = uploads.map(u => `
     <div class="up-item">
@@ -2176,7 +2147,11 @@ function renderUploads() {
         <div class="up-sub">${esc(u.file.name)} · ${fmtSize(u.file.size)}</div>
         ${upSubText(u)}
       </div>
-      ${(upType === 'multi' && coverCandidate() === u.file) ? '<span class="multi-badge" style="align-self:center">表紙</span>' : ''}
+      ${(upType === 'multi' && u.kind === 'image' && u.status !== 'error' && u.status !== 'done')
+        ? ((coverItem() && coverItem().key === u.key)
+            ? `<button class="btn-cover on" onclick="pickCover('${u.key}')" title="表紙を解除">🖼️ 表紙</button>`
+            : `<button class="btn-cover" onclick="pickCover('${u.key}')">表紙にする</button>`)
+        : ''}
       ${u.status === 'uploading' || u.status === 'done' ? '' : `<button class="up-remove" onclick="removeUpload('${u.key}')" title="外す">×</button>`}
     </div>`).join('');
   const ready = uploads.filter(u => u.status === 'ready').length;
