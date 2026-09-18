@@ -268,6 +268,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .side-edit { background: var(--bg); }
 .side-title { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
 .side-edit .form-row:last-of-type { margin-bottom: 16px; }
+.save-row { display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px; }
+.save-row .btn-add { padding: 10px 8px; }
 .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 6px; cursor: pointer; }
 .chk input { width: auto; margin: 0; }
 .user-chip { font-size: 11px; padding: 2px 9px; border-radius: 12px; background: var(--word-bg); color: var(--word-text); font-weight: 500; white-space: nowrap; }
@@ -378,7 +380,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   <div class="toolbar">
     <div class="search-box">
       <span class="search-icon">🔍</span>
-      <input type="text" id="searchInput" placeholder="資料名・中身の文章・タグで検索" oninput="onSearch(this.value)">
+      <input type="text" id="searchInput" placeholder="資料名・中身の文章で検索" oninput="onSearch(this.value)">
     </div>
     <div class="seg" id="kindSeg">
       <button class="active" data-kind="all" onclick="setKind('all')">すべて</button>
@@ -450,17 +452,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
       </div>
       <input type="file" id="fileInput" multiple accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="addUploadFiles(this.files); this.value=''">
       <div class="up-list" id="upList"></div>
-      <div class="form-2col">
-        <div class="form-row">
-          <label>カテゴリ（まとめて設定）</label>
-          <div class="inline-add">
-            <select id="upCat"></select>
-            <button type="button" onclick="quickAddCat('upCat')">＋新規</button>
-          </div>
-        </div>
-        <div class="form-row">
-          <label>タグ（カンマ区切り）</label>
-          <input type="text" id="upTags" placeholder="例: 2026年度, 見積, 社外秘">
+      <div class="form-row">
+        <label>カテゴリ（まとめて設定）</label>
+        <div class="inline-add">
+          <select id="upCat"></select>
+          <button type="button" onclick="quickAddCat('upCat')">＋新規</button>
         </div>
       </div>
       <div class="form-row"><label>メモ</label><textarea id="upMemo" placeholder="資料の補足など（任意）"></textarea></div>
@@ -530,7 +526,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.9.0';
+const APP_VERSION = 'v1.10.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1327,7 +1323,7 @@ function renderDocs() {
         const snip = words.length ? snippetOf(d, words) : '';
         return `<tr class="clickable" onclick="openDetail('${esc(d.id)}')">
           <td><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span></td>
-          <td class="col-name">${highlight(d.title, searchText)}${(d.tags || []).length ? `<div class="chip-row" style="margin-top:4px">${d.tags.map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : ''}</td>
+          <td class="col-name">${highlight(d.title, searchText)}</td>
           <td class="nowrap">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : '<span class="muted">—</span>'}</td>
           <td class="nowrap">${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : '<span class="muted">—</span>'}</td>
           <td class="nowrap">${d.orientation ? esc(d.orientation) : '<span class="muted">—</span>'}</td>
@@ -1348,7 +1344,7 @@ function renderDocs() {
       </div>
       ${d.preview ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
       <div class="card-body">
-        ${(d.categoryId || d.user || d.orientation || (d.tags || []).length) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : ''}${d.orientation ? `<span class="tag-chip">📄 ${esc(d.orientation)}</span>` : ''}${(d.tags || []).map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : ''}
+        ${(d.categoryId || d.user || d.orientation) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : ''}${d.orientation ? `<span class="tag-chip">📄 ${esc(d.orientation)}</span>` : ''}</div>` : ''}
         ${snip ? `<div><div class="sum-label">一致した箇所</div><div class="snippet">${highlight(snip, searchText)}</div></div>` : summaryHtml(d, true)}
       </div>
       <div class="card-meta"><span>${metaCounts(d)} · ${fmtSize(d.size)}</span><span>${fmtDate(d.createdAt)}</span></div>
@@ -1476,7 +1472,7 @@ function renderDetailSide(d) {
       <div class="replace-zone" id="replaceZone" onclick="document.getElementById('replaceInput').click()">
         <div class="rz-icon">📥</div>
         <div class="rz-title">新しいファイルをドラッグ＆ドロップ</div>
-        <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・タグ・メモ・履歴はそのまま引き継ぎます</div>
+        <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・メモ・履歴はそのまま引き継ぎます</div>
       </div>
       <input type="file" id="replaceInput" accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
       ${(d.updates || []).length ? `<div class="dl-history" style="max-height:120px">${d.updates.slice().reverse().map(x => `<div class="dl-row">${fmtDateTime(x.at)} ${esc(x.name || '')}</div>`).join('')}</div>` : ''}
@@ -1506,9 +1502,11 @@ function renderDetailSide(d) {
         <label>カテゴリ</label>
         <div class="inline-add"><select id="dsCat">${catOptions(d.categoryId || '', false)}</select><button type="button" onclick="quickAddCat('dsCat')">＋新規</button></div>
       </div>
-      <div class="form-row"><label>タグ（カンマ区切り）</label><input type="text" id="dsTags" value="${esc((d.tags || []).join(', '))}"></div>
       <div class="form-row"><label>メモ</label><textarea id="dsMemo">${esc(d.memo || '')}</textarea></div>
-      <button class="btn-add" style="width:100%" onclick="handleDetailSave()">保存</button>
+      <div class="save-row">
+        <button class="btn-add" onclick="handleDetailSave(false)">保存</button>
+        <button class="btn-add" onclick="handleDetailSave(true)">保存して閉じる</button>
+      </div>
     </div>
     </div>`;
   const sel = document.getElementById('dsCat'); if (sel) sel.value = d.categoryId || '';
@@ -1531,7 +1529,7 @@ async function handleReplaceFile(file) {
   const kind = kindOf(file.name);
   if (!kind) { toast('Word / Excel のファイルを選んでください', 'error'); return; }
   if (file.size > MAX_FILE_MB * 1024 * 1024) { toast(`${MAX_FILE_MB}MBを超えるファイルはアップできません`, 'error'); return; }
-  if (!confirm(`「${d.title}」のファイルを\n「${file.name}」に差し替えますか？\n\n前のファイルは置き換えられます（資料名・カテゴリ・タグ・メモ・ダウンロード履歴はそのまま残ります）。`)) return;
+  if (!confirm(`「${d.title}」のファイルを\n「${file.name}」に差し替えますか？\n\n前のファイルは置き換えられます（資料名・カテゴリ・メモ・ダウンロード履歴はそのまま残ります）。`)) return;
   const backup = JSON.parse(JSON.stringify({ path: d.path, sha: d.sha, size: d.size, ext: d.ext, kind: d.kind, originalName: d.originalName, summary: d.summary, searchText: d.searchText, preview: d.preview, updatedAt: d.updatedAt, updates: d.updates || [] }));
   showLoading('中身を読み取り中...');
   try {
@@ -1597,14 +1595,13 @@ async function renameStoredFile(d) {
   await deleteFileFromGitHub(oldPath, oldSha);
 }
 
-async function handleDetailSave() {
+async function handleDetailSave(closeAfter) {
   const d = state.docs.find(x => x.id === detailId); if (!d) return;
-  const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, tags: d.tags, memo: d.memo, user: d.user || '', orientation: d.orientation || '', updatedAt: d.updatedAt }));
+  const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, memo: d.memo, user: d.user || '', orientation: d.orientation || '', updatedAt: d.updatedAt }));
   d.title = document.getElementById('dsTitle').value.trim() || d.originalName;
   d.categoryId = document.getElementById('dsCat').value || '';
   d.user = document.getElementById('dsUser').value || '';
   d.orientation = document.getElementById('dsOri').value || '';
-  d.tags = parseTags(document.getElementById('dsTags').value);
   d.memo = document.getElementById('dsMemo').value.trim();
   d.updatedAt = new Date().toISOString();
   const savedSheet = (d.preview && d.preview.sheet) || '';
@@ -1619,8 +1616,9 @@ async function handleDetailSave() {
     if (wantRename) { showLoading('ファイル名を変更中...'); await renameStoredFile(d); showLoading('保存中...'); }
     await saveData(`edit: ${d.originalName}`);
     toast(wantRename ? `保存しました（ファイル名：${d.originalName}）` : '保存しました', 'success');
-    document.getElementById('detailTitle').textContent = `${d.kind === 'word' ? '📘' : '📗'} ${d.title}`;
     renderAll();
+    if (closeAfter) { closeModal('detailModal'); detailId = null; return; }
+    document.getElementById('detailTitle').textContent = `${d.kind === 'word' ? '📘' : '📗'} ${d.title}`;
     renderDetailSide(d);
     if (sheetChanged) renderExcelTabs(d, 0);
   } catch (e) { Object.assign(d, backup); toast(e.message, 'error'); renderDetailSide(d); }
@@ -1766,7 +1764,6 @@ function openUpload(files) {
   if (!auth.owner || !auth.repo) { toast('先に⚙️設定でGitHub保存先を登録してください', 'error'); openSettings(); return; }
   uploads = [];
   document.getElementById('upCat').innerHTML = catOptions(filterCat !== 'all' && filterCat !== 'none' ? filterCat : '', false);
-  document.getElementById('upTags').value = '';
   document.getElementById('upMemo').value = '';
   renderUploads();
   showModal('uploadModal');
@@ -1821,7 +1818,6 @@ async function handleUpload() {
   if (!targets.length) return;
   if (state._loadFailed || state._wasEmpty) { toast('データの読み込みに失敗しているため保存できません。「🔄更新」してください', 'error'); return; }
   const categoryId = document.getElementById('upCat').value || '';
-  const tags = parseTags(document.getElementById('upTags').value);
   const memo = document.getElementById('upMemo').value.trim();
   document.getElementById('upSaveBtn').disabled = true;
   const added = [];
@@ -1845,7 +1841,7 @@ async function handleUpload() {
       const now = new Date().toISOString();
       const doc = {
         id, title: (u.title || '').trim() || u.file.name, originalName: u.file.name, ext: u.ext, kind: u.kind,
-        path, sha, size: u.file.size, mime: u.file.type || '', categoryId, tags, memo, preview,
+        path, sha, size: u.file.size, mime: u.file.type || '', categoryId, memo, preview,
         createdAt: now, updatedAt: now, summary: u.analysis.summary, searchText: u.analysis.searchText
       };
       state.docs.push(doc); added.push(doc);
