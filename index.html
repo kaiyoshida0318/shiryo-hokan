@@ -277,7 +277,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .drop-overlay.show { display: flex; }
 
 /* ===== Detail ===== */
-.detail { display: grid; grid-template-columns: minmax(0,1fr) 560px; gap: 18px; height: 100%; min-height: 0; }
+.detail { display: grid; grid-template-columns: minmax(0,1fr) 680px; gap: 18px; height: 100%; min-height: 0; }
 .detail-side { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding-right: 2px; }
 .side-top { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 .side-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
@@ -302,9 +302,10 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cover-bar-label { font-size: 12px; font-weight: 700; color: var(--text-muted); }
 .cover-bar-spacer { flex: 1; }
 .cover-box img { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
-.file-row { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
+.file-row { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-light); }
+.fr-actions { grid-column: 2 / -1; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .file-row .file-icon { width: 34px; height: 34px; font-size: 10px; }
-.file-row input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
+.file-row input { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
 .file-row .fr-size { font-size: 11px; color: var(--text-light); white-space: nowrap; font-family: ui-monospace, monospace; }
 .files-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .files-head .btn-icon { margin-left: auto; }
@@ -382,6 +383,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .loading-text { font-size: 13px; color: var(--text-muted); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+@media (max-width: 1400px) { .detail { grid-template-columns: minmax(0,1fr) 560px; } }
+@media (max-width: 1100px) { .detail { grid-template-columns: minmax(0,1fr) 460px; } }
 @media (max-width: 760px) {
   .app-header { padding: 10px 12px; gap: 8px; }
   .header-actions { flex-wrap: nowrap; gap: 6px; }
@@ -569,7 +572,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.13.0';
+const APP_VERSION = 'v2.14.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1947,12 +1950,14 @@ function renderDetailSide(d) {
           <div class="file-icon ${f.kind}">${extLabel(f.ext)}</div>
           <input type="text" value="${esc(f.title)}" onchange="renameMember('${esc(d.id)}','${esc(f.fid)}',this.value)" title="ファイルの名前">
           <span class="fr-size">${fmtSize(f.size)}</span>
-          ${(f.kind === 'image' || f.kind === 'pdf') ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">${(coverSource(d) && coverSource(d).fid === f.fid) ? '（表紙）' : '表紙にする'}</button>` : ''}
-          <button class="fr-move" onclick="moveMember('${esc(d.id)}','${esc(f.fid)}',-1)" ${i === 0 ? 'disabled' : ''} title="上へ">↑</button>
-          <button class="fr-move" onclick="moveMember('${esc(d.id)}','${esc(f.fid)}',1)" ${i === (d.files || []).length - 1 ? 'disabled' : ''} title="下へ">↓</button>
-          <button onclick="_mTab(${i + 1})" title="開く">👁️ 表示</button>
-          <button class="fr-dl" onclick="downloadMember(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="ダウンロード">⬇️ DL</button>
-          <button class="fr-del" onclick="removeFileFromDoc(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="削除">🗑️ 削除</button>
+          <div class="fr-actions">
+            ${(f.kind === 'image' || f.kind === 'pdf') ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">${(coverSource(d) && coverSource(d).fid === f.fid) ? '（表紙）' : '表紙にする'}</button>` : ''}
+            <button class="fr-move" onclick="moveMember('${esc(d.id)}','${esc(f.fid)}',-1)" ${i === 0 ? 'disabled' : ''} title="上へ">↑</button>
+            <button class="fr-move" onclick="moveMember('${esc(d.id)}','${esc(f.fid)}',1)" ${i === (d.files || []).length - 1 ? 'disabled' : ''} title="下へ">↓</button>
+            <button onclick="_mTab(${i + 1})" title="開く">👁️ 表示</button>
+            <button class="fr-dl" onclick="downloadMember(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="ダウンロード">⬇️ DL</button>
+            <button class="fr-del" onclick="removeFileFromDoc(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="削除">🗑️ 削除</button>
+          </div>
         </div>`).join('')}
       <div class="replace-zone" id="replaceZone" style="margin-top:12px" onclick="document.getElementById('replaceInput').click()">
         <div class="rz-icon">➕</div>
