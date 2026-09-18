@@ -557,7 +557,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.8.0';
+const APP_VERSION = 'v2.9.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1691,13 +1691,13 @@ function renderMultiTabs(d, idx) {
       const url = src ? await coverUrl(d).catch(() => null) : null;
       if (!box || detailId !== d.id) return;
       const imgs = imageMembers(d);
-      const activeFid = src && src.kind === 'member' ? src.fid : null;
+      const activeFid = src && src.fid ? src.fid : null;
       const chooser = `
         <div class="cover-bar">
-          <span class="cover-bar-label">🖼️ 表紙にする画像</span>
-          ${imgs.map(f => `<button class="btn-cover ${activeFid === f.fid ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="${esc(f.title)}">${activeFid === f.fid ? '🖼️ ' : ''}${esc(f.title.slice(0, 16))}</button>`).join('')}
+          <span class="cover-bar-label">🖼️ 表紙にするファイル</span>
+          ${imgs.map(f => `<button class="btn-cover ${activeFid === f.fid ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="${esc(f.title)}">${f.kind === 'pdf' ? '📕 ' : '🖼️ '}${esc(f.title.slice(0, 16))}</button>`).join('')}
           ${(src && src.kind === 'cover') ? `<button class="btn-cover on">登録済みの表紙</button>` : ''}
-          ${imgs.length ? '' : '<span class="muted" style="font-size:12px">中に画像ファイルを追加すると、表紙に選べます</span>'}
+          ${imgs.length ? '' : '<span class="muted" style="font-size:12px">中に画像かPDFを追加すると、表紙に選べます</span>'}
           <span class="cover-bar-spacer"></span>
           ${url ? `<button class="btn-icon danger" onclick="removeCoverImage('${esc(d.id)}')">🗑️ 表紙を外す</button>` : ''}
         </div>`;
@@ -1706,7 +1706,7 @@ function renderMultiTabs(d, idx) {
         : `<div class="replace-zone" style="padding:60px 20px" onclick="document.getElementById('replaceInput').click()">
              <div class="rz-icon">🖼️</div>
              <div class="rz-title">表紙にする画像がありません</div>
-             <div class="rz-desc">画像ファイル（JPG / PNG など）をこの資料に追加すると、上のボタンから表紙に選べます</div>
+             <div class="rz-desc">画像（JPG / PNG など）やPDFをこの資料に追加すると、上のボタンから表紙に選べます<br>PDFは1ページ目が表紙になります</div>
            </div>`);
     })();
     return;
@@ -1821,7 +1821,7 @@ function renderDetailSide(d) {
           <div class="file-icon ${f.kind}">${extLabel(f.ext)}</div>
           <input type="text" value="${esc(f.title)}" onchange="renameMember('${esc(d.id)}','${esc(f.fid)}',this.value)" title="ファイルの名前">
           <span class="fr-size">${fmtSize(f.size)}</span>
-          ${f.kind === 'image' ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">表紙</button>` : ''}
+          ${(f.kind === 'image' || f.kind === 'pdf') ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">表紙</button>` : ''}
           <button onclick="_mTab(${i + 1})" title="開く">👁️</button>
           <button onclick="downloadMember(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="ダウンロード">⬇️</button>
           <button onclick="removeFileFromDoc(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="削除">🗑️</button>
@@ -2134,7 +2134,7 @@ let upCoverKey = null, noCover = false;
 function coverItem() {
   if (upType !== 'multi' || noCover) return null;
   if (upCoverKey) { const u = uploads.find(x => x.key === upCoverKey); if (u) return u; }
-  return uploads.find(u => u.kind === 'image' && u.status !== 'error') || null;
+  return uploads.find(u => (u.kind === 'image' || u.kind === 'pdf') && u.status !== 'error') || null;
 }
 function coverCandidate() { const u = coverItem(); return u ? u.file : null; }
 function pickCover(key) {
@@ -2167,7 +2167,7 @@ function renderUploads() {
         <div class="up-sub">${esc(u.file.name)} · ${fmtSize(u.file.size)}</div>
         ${upSubText(u)}
       </div>
-      ${(upType === 'multi' && u.kind === 'image' && u.status !== 'error' && u.status !== 'done')
+      ${(upType === 'multi' && (u.kind === 'image' || u.kind === 'pdf') && u.status !== 'error' && u.status !== 'done')
         ? ((coverItem() && coverItem().key === u.key)
             ? `<button class="btn-cover on" onclick="pickCover('${u.key}')" title="表紙を解除">🖼️ 表紙</button>`
             : `<button class="btn-cover" onclick="pickCover('${u.key}')">表紙にする</button>`)
@@ -2295,7 +2295,7 @@ async function fileBuffer(f) {
 }
 // 表紙画像
 const coverCache = new Map(); // docId -> objectURL
-function imageMembers(d) { return (d.files || []).filter(f => f.kind === 'image'); }
+function imageMembers(d) { return (d.files || []).filter(f => f.kind === 'image' || f.kind === 'pdf'); }
 // 表紙にするもの: ①アップした表紙画像 ②選んだ中の画像 ③中の画像の1枚目
 function coverSource(d) {
   if (d.cover) return { kind: 'cover', path: d.cover.path, mime: d.cover.mime || 'image/png' };
@@ -2304,7 +2304,7 @@ function coverSource(d) {
   if (!imgs.length) return null;
   const picked = d.coverFid ? imgs.find(f => f.fid === d.coverFid) : null;
   const f = picked || imgs[0];
-  return { kind: 'member', fid: f.fid, path: f.path, mime: `image/${f.ext === 'jpg' ? 'jpeg' : f.ext}`, title: f.title };
+  return { kind: f.kind === 'pdf' ? 'pdf' : 'member', fid: f.fid, path: f.path, mime: `image/${f.ext === 'jpg' ? 'jpeg' : f.ext}`, title: f.title };
 }
 async function coverUrl(d) {
   const src = coverSource(d);
@@ -2312,7 +2312,9 @@ async function coverUrl(d) {
   const key = d.id + '|' + src.path;
   if (coverCache.has(key)) return coverCache.get(key);
   const buf = await fetchRepoFile(src.path);
-  const url = URL.createObjectURL(new Blob([buf], { type: src.mime }));
+  let url;
+  if (src.kind === 'pdf') { url = (await pdfPageImageUrl(buf, 1)).url; }     // PDFは1ページ目を表紙に
+  else url = URL.createObjectURL(new Blob([buf], { type: src.mime }));
   coverCache.set(key, url);
   return url;
 }
@@ -2334,7 +2336,7 @@ async function pickCoverMember(docId, fid) {
   }
   clearCoverCache(d);
   toast('表紙を変えました', 'success');
-  renderAll(); if (detailId === d.id) renderMultiTabs(d, 0);
+  renderAll(); if (detailId === d.id) { renderDetailSide(d); renderMultiTabs(d, 0); }
 }
 async function removeCoverImage(docId) {
   const d = state.docs.find(x => x.id === docId); if (!d) return;
