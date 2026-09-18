@@ -510,7 +510,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.3.0';
+const APP_VERSION = 'v1.4.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -727,8 +727,14 @@ function analyzeWorkbook(buf, ext) {
     }
     allRows[name] = { rows: nonEmpty, headerIdx: hIdx };
   }
-  // 一番中身の多いシートをプレビュー画像にする
-  const main = [...sheets].filter(x => !x.hidden).sort((a, b) => b.rows * Math.max(b.cols, 1) - a.rows * Math.max(a.cols, 1))[0];
+  // エクセルを開いたとき最初に表示されるシート(なければ最初の表示シート)をプレビューにする
+  const visible = sheets.filter(x => !x.hidden && x.rows > 0);
+  let main = visible[0] || sheets.find(x => !x.hidden) || sheets[0];
+  try {
+    const at = wb.Workbook && wb.Workbook.Views && wb.Workbook.Views[0] && wb.Workbook.Views[0].activeTab;
+    const act = (typeof at === 'number') ? sheets[at] : null;
+    if (act && !act.hidden && act.rows > 0) main = act;
+  } catch (e) {}
   return {
     summary: { excel: { sheets, mainSheet: main ? main.name : '' } },
     searchText: texts.join('\n').slice(0, SEARCH_TEXT_MAX),
@@ -825,7 +831,12 @@ async function renderStyledSheetImage(buf, sheetName) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
   let ws = sheetName ? wb.worksheets.find(w => w.name === sheetName) : null;
-  if (!ws) ws = wb.worksheets.filter(w => w.state !== 'hidden').sort((a, b) => (b.actualRowCount || 0) * (b.actualColumnCount || 0) - (a.actualRowCount || 0) * (a.actualColumnCount || 0))[0];
+  if (!ws) {
+    const shown = wb.worksheets.filter(w => w.state !== 'hidden' && (w.actualRowCount || 0) > 0);
+    const at = wb.views && wb.views[0] && wb.views[0].activeTab;
+    const act = (typeof at === 'number') ? wb.worksheets[at] : null;
+    ws = (act && act.state !== 'hidden' && (act.actualRowCount || 0) > 0) ? act : (shown[0] || wb.worksheets[0]);
+  }
   if (!ws) return null;
   const dim = ws.dimensions || {};
   const rowCount = Math.min(dim.bottom || ws.rowCount || 0, STY_ROW_MAX);
