@@ -267,6 +267,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .side-edit { background: var(--bg); }
 .side-title { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
 .side-edit .form-row:last-of-type { margin-bottom: 16px; }
+.chk { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 6px; cursor: pointer; }
+.chk input { width: auto; margin: 0; }
 .user-chip { font-size: 11px; padding: 2px 9px; border-radius: 12px; background: var(--word-bg); color: var(--word-text); font-weight: 500; white-space: nowrap; }
 .dl-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn-link { border: none; background: transparent; color: var(--primary-dark); font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit; }
@@ -527,11 +529,12 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.7.0';
+const APP_VERSION = 'v1.8.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
 const LS_VIEW = 'shiryoHokan.view';
+const LS_RENAME = 'shiryoHokan.renameWithTitle';
 const SEARCH_TEXT_MAX = 20000;   // 検索用に保存する本文の最大文字数
 const PREVIEW_ROW_MAX = 500;     // Excelプレビュー(表)の最大行数
 const IMG_ROW_MAX = 60;          // プレビュー画像に描く最大行数
@@ -548,7 +551,7 @@ let state = { docs: [], categories: [], settings: { users: [...DEFAULT_USERS] },
 let currentTab = 'docs';
 let filterKind = 'all', filterCat = 'all', filterUser = 'all', searchText = '', sortKey = 'new', viewMode = 'card';
 let uploads = [];          // アップロード待ちファイル
-let editingCatId = null, detailId = null, pendingSheet = '';
+let editingCatId = null, detailId = null, pendingSheet = '', renameWithTitle = true;
 
 /* ==================== GitHub helpers ==================== */
 async function ghFetch(path, opts = {}) {
@@ -564,6 +567,12 @@ async function ghFetch(path, opts = {}) {
 function encPath(p) { return p.split('/').map(encodeURIComponent).join('/'); }
 function b64encode(str) {
   const bytes = new TextEncoder().encode(str);
+  let bin = ''; const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+function bufToBase64(buf) {
+  const bytes = new Uint8Array(buf);
   let bin = ''; const CH = 0x8000;
   for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
   return btoa(bin);
@@ -1101,6 +1110,7 @@ function loadAuth() {
     auth = { pat: a.pat || '', owner: a.owner || '', repo: a.repo || '', branch: a.branch || 'main' };
   } catch (e) {}
   try { viewMode = localStorage.getItem(LS_VIEW) === 'list' ? 'list' : 'card'; } catch (e) {}
+  try { renameWithTitle = localStorage.getItem(LS_RENAME) !== '0'; } catch (e) {}
 }
 function saveAuth() { try { localStorage.setItem(LS_AUTH, JSON.stringify(auth)); } catch (e) { toast('設定の保存に失敗しました(ブラウザのストレージ制限)', 'error'); } }
 function updateConnPill() {
@@ -1461,7 +1471,12 @@ function renderDetailSide(d) {
     </div>
     <div class="side-block side-edit">
       <div class="side-title">✏️ 編集</div>
-      <div class="form-row"><label>資料名</label><input type="text" id="dsTitle" value="${esc(d.title)}"></div>
+      <div class="form-row">
+        <label>資料名</label>
+        <input type="text" id="dsTitle" value="${esc(d.title)}">
+        <label class="chk"><input type="checkbox" id="dsRename" ${renameWithTitle ? 'checked' : ''}> 保存するファイル名も資料名に合わせる</label>
+        <span class="form-hint">現在のファイル名：${esc(d.originalName)}</span>
+      </div>
       <div class="form-2col">
         <div class="form-row"><label>メインの使用者</label><select id="dsUser">${userOptions(d.user || '', false)}</select></div>
         <div class="form-row"><label>PDFの向き</label><select id="dsOri"><option value="">（未設定）</option>${ORIENTATIONS.map(o => `<option value="${o}"${d.orientation === o ? ' selected' : ''}>${o}</option>`).join('')}</select></div>
@@ -1563,6 +1578,22 @@ async function handleReplaceFile(file) {
   } finally { hideLoading(); }
 }
 
+// GitHub上のファイル名を資料名に合わせて変更する
+async function renameStoredFile(d) {
+  const newName = `${d.title}.${d.ext}`;
+  const newPath = `${DATA_DIR}/files/${d.id}/${safeFilename(newName)}`;
+  if (newPath === d.path) { d.originalName = newName; return; }
+  const buf = await getDocBuffer(d);
+  const res = await ghFetch(`contents/${encPath(newPath)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ message: `rename: ${d.originalName} -> ${newName}`, content: bufToBase64(buf), branch: auth.branch })
+  });
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || 'ファイル名の変更に失敗しました'); }
+  const oldPath = d.path, oldSha = d.sha;
+  d.path = newPath; d.sha = (await res.json()).content.sha; d.originalName = newName;
+  await deleteFileFromGitHub(oldPath, oldSha);
+}
+
 async function handleDetailSave() {
   const d = state.docs.find(x => x.id === detailId); if (!d) return;
   const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, tags: d.tags, memo: d.memo, user: d.user || '', orientation: d.orientation || '', updatedAt: d.updatedAt }));
@@ -1575,11 +1606,16 @@ async function handleDetailSave() {
   d.updatedAt = new Date().toISOString();
   const savedSheet = (d.preview && d.preview.sheet) || '';
   const sheetChanged = d.kind === 'excel' && pendingSheet && pendingSheet !== savedSheet;
+  const renameChk = document.getElementById('dsRename');
+  renameWithTitle = renameChk ? renameChk.checked : renameWithTitle;
+  try { localStorage.setItem(LS_RENAME, renameWithTitle ? '1' : '0'); } catch (e) {}
+  const wantRename = renameWithTitle && d.title !== backup.title;
   showLoading(sheetChanged ? `「${pendingSheet}」の画像を作成中...` : '保存中...');
   try {
     if (sheetChanged) { await savePreviewFor(d, pendingSheet); showLoading('保存中...'); }
+    if (wantRename) { showLoading('ファイル名を変更中...'); await renameStoredFile(d); showLoading('保存中...'); }
     await saveData(`edit: ${d.originalName}`);
-    toast('保存しました', 'success');
+    toast(wantRename ? `保存しました（ファイル名：${d.originalName}）` : '保存しました', 'success');
     document.getElementById('detailTitle').textContent = `${d.kind === 'word' ? '📘' : '📗'} ${d.title}`;
     renderAll();
     renderDetailSide(d);
