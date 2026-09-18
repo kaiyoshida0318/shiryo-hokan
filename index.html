@@ -579,7 +579,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.20.0';
+const APP_VERSION = 'v2.20.1';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1631,7 +1631,10 @@ function setupThumbs() {
           const srcs = coverSources(d);
           const urls = (await Promise.all(srcs.map((x, i) => coverUrl(d, x.slot || i + 1).catch(() => null)))).filter(Boolean);
           if (!urls.length) { el.remove(); return; }
-          el.innerHTML = urls.map(u => `<img src="${u}" alt="">`).join('');
+          el.classList.toggle('two', urls.length > 1);
+          el.innerHTML = urls.length > 1
+            ? urls.map(u => `<img src="${u}" alt="">`).join('')
+            : `<img src="${urls[0]}" alt="" style="width:100%">`;
         } else {
           const url = await previewImageUrl(d);
           if (url) el.innerHTML = `<img src="${url}" alt="" style="width:${(d.preview && d.preview.w) ? d.preview.w + 'px' : '100%'};max-width:100%">`;
