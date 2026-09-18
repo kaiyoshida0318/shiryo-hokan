@@ -330,6 +330,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .save-row .btn-add { padding: 10px 8px; }
 .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 6px; cursor: pointer; }
 .chk input { width: auto; margin: 0; }
+.paper-chip { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 6px; background: #fef3c7; color: #92400e; font-family: ui-monospace, monospace; }
 .user-chip { font-size: 11px; padding: 2px 9px; border-radius: 12px; background: var(--word-bg); color: var(--word-text); font-weight: 500; white-space: nowrap; }
 .dl-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn-link { border: none; background: transparent; color: var(--primary-dark); font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit; }
@@ -579,7 +580,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.20.1';
+const APP_VERSION = 'v2.22.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -593,6 +594,12 @@ const MAX_FILE_MB = 50;
 const DL_HISTORY_MAX = 30;       // 残すダウンロード履歴の件数
 const DEFAULT_USERS = ['吉田', '高橋', '遠藤'];
 const ORIENTATIONS = ['縦', '横'];
+const PAPERS = [
+  { id: 'A4', label: 'A4（21×29.7cm）' },
+  { id: 'A5', label: 'A5（14.8×21cm）' },
+  { id: 'A6', label: 'A6（10.5×14.8cm）' },
+  { id: 'A7', label: 'A7（7.4×10.5cm）' }
+];
 
 const KIND_BY_EXT = {
   docx: 'word', doc: 'word',
@@ -682,7 +689,22 @@ async function loadRecords() {
   }
 }
 
-async function saveData(message, retryCount = 0) {
+// 保存はキューに入れて1件ずつ実行する（同時保存によるsha不一致を防ぐ）
+let saveChain = Promise.resolve();
+function saveData(message) {
+  const run = () => saveDataNow(message);
+  saveChain = saveChain.then(run, run);
+  return saveChain;
+}
+async function currentDataSha() {
+  try {
+    const head = await ghFetch(`contents/${DATA_PATH}?ref=${encodeURIComponent(auth.branch)}`);
+    if (head.status === 404) return null;
+    if (head.ok) return (await head.json()).sha;
+  } catch (e) {}
+  return undefined;   // 取得できなかった
+}
+async function saveDataNow(message, attempt = 0) {
   if (state._loadFailed || state._wasEmpty) {
     throw new Error('データの読み込みに失敗しているため、上書き保存を中止しました。「🔄更新」で再読み込みしてください。');
   }
@@ -690,18 +712,22 @@ async function saveData(message, retryCount = 0) {
   const body = { message: message || 'update data', content: b64encode(content), branch: auth.branch };
   if (state.sha) body.sha = state.sha;
   const res = await ghFetch(`contents/${DATA_PATH}`, { method: 'PUT', body: JSON.stringify(body) });
-  if (!res.ok) {
-    if ((res.status === 409 || res.status === 422) && retryCount < 1) {
-      try {
-        const head = await ghFetch(`contents/${DATA_PATH}?ref=${encodeURIComponent(auth.branch)}`);
-        if (head.ok) { state.sha = (await head.json()).sha; return saveData(message, retryCount + 1); }
-      } catch (e) {}
+  if (res.ok) { state.sha = (await res.json()).content.sha; return; }
+  let msg = `GitHub保存失敗 (status:${res.status})`;
+  try { const err = await res.json(); if (err.message) msg = err.message; } catch (e) {}
+  const conflict = res.status === 409 || res.status === 422 || /does not match|sha/i.test(msg);
+  if (conflict && attempt < 3) {
+    const sha = await currentDataSha();          // 最新のshaを取り直して再試行
+    if (sha !== undefined) {
+      state.sha = sha;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+      return saveDataNow(message, attempt + 1);
     }
-    let msg = `GitHub保存失敗 (status:${res.status})`;
-    try { const err = await res.json(); if (err.message) msg = err.message; } catch (e) {}
-    throw new Error(msg);
   }
-  state.sha = (await res.json()).content.sha;
+  if (conflict) {
+    throw new Error('別の保存と重なったため保存できませんでした。「🔄更新」を押して読み込み直してから、もう一度お試しください。');
+  }
+  throw new Error(msg);
 }
 
 function safeFilename(name) {
@@ -709,12 +735,21 @@ function safeFilename(name) {
   const base = name.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|#%&{}$!'@`+=~^\[\]\s\u0000-\u001f]/g, '_').replace(/_+/g, '_').slice(0, 60) || 'file';
   return `${base}.${ext}`;
 }
-async function uploadFileToGitHub(path, file) {
+async function uploadFileToGitHub(path, file, existingSha) {
   const content = await fileToBase64(file);
-  const res = await ghFetch(`contents/${encPath(path)}`, {
-    method: 'PUT',
-    body: JSON.stringify({ message: `upload: ${file.name}`, content, branch: auth.branch })
-  });
+  const body = { message: `upload: ${file.name}`, content, branch: auth.branch };
+  if (existingSha) body.sha = existingSha;
+  let res = await ghFetch(`contents/${encPath(path)}`, { method: 'PUT', body: JSON.stringify(body) });
+  if (!res.ok && (res.status === 409 || res.status === 422)) {
+    // 同じ場所に既にファイルがある場合は、そのshaを付けて上書き
+    try {
+      const head = await ghFetch(`contents/${encPath(path)}?ref=${encodeURIComponent(auth.branch)}`);
+      if (head.ok) {
+        body.sha = (await head.json()).sha;
+        res = await ghFetch(`contents/${encPath(path)}`, { method: 'PUT', body: JSON.stringify(body) });
+      }
+    } catch (e) {}
+  }
   if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || `アップロード失敗 (status:${res.status})`); }
   return (await res.json()).content.sha;
 }
@@ -1445,7 +1480,7 @@ function catOptions(selected, withAll) {
 
 function matchKind(x, k) { return k === 'ai' ? (x.kind === 'ai') : x.kind === k; }
 function matchDoc(d, words) {
-  const parts = [d.title, d.memo, catName(d.categoryId), d.user || ''];
+  const parts = [d.title, d.memo, catName(d.categoryId), d.user || '', d.paper || ''];
   if (isMulti(d)) (d.files || []).forEach(f => parts.push(f.title, f.originalName, f.searchText));
   else parts.push(d.originalName, d.searchText);
   const hay = parts.join('\n').toLowerCase();
@@ -1553,7 +1588,7 @@ function renderDocs() {
     return;
   }
   if (viewMode === 'list') {
-    el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>種類</th><th>資料名</th><th>カテゴリ</th><th>使用者</th><th>中身の概要</th><th>最終DL</th><th>登録日</th></tr></thead><tbody>${
+    el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>種類</th><th>資料名</th><th>カテゴリ</th><th>用紙</th><th>使用者</th><th>中身の概要</th><th>最終DL</th><th>登録日</th></tr></thead><tbody>${
       list.map(d => {
         const snip = words.length ? snippetOf(d, words) : '';
         return `<tr class="clickable" onclick="openDetail('${esc(d.id)}')">
@@ -1562,6 +1597,7 @@ function renderDocs() {
             : `<span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span>`}</td>
           <td class="col-name">${highlight(d.title, searchText)}</td>
           <td class="nowrap">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : '<span class="muted">—</span>'}</td>
+          <td class="nowrap">${d.paper ? `<span class="paper-chip">${esc(d.paper)}</span>` : '<span class="muted">—</span>'}</td>
           <td class="nowrap">${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : '<span class="muted">—</span>'}</td>
           <td class="col-sum">${snip ? `<div class="snippet">${highlight(snip, searchText)}</div>` : listSummary(d)}</td>
           <td class="nowrap muted">${d.lastDownloadAt ? `${fmtDate(d.lastDownloadAt)}<br><span class="muted">${(d.downloads || []).length}回</span>` : '—'}</td>
@@ -1577,7 +1613,7 @@ function renderDocs() {
     return `<div class="card ${multi ? 'multi' : d.kind}" onclick="openDetail('${esc(d.id)}')">
       <div class="card-bar" style="background:${kindBar(d)}"></div>
       <div class="card-head">
-        <div class="card-titles"><div class="card-name">${highlight(d.title, searchText)}</div>${multi ? `<div class="card-file">${(d.files || []).length} ファイル</div>` : ''}</div>
+        <div class="card-titles"><div class="card-name">${highlight(d.title, searchText)}</div>${(d.paper || multi) ? `<div class="card-file">${d.paper ? `<span class="paper-chip">${esc(d.paper)}</span>` : ''}${multi ? `${d.paper ? ' ・ ' : ''}${(d.files || []).length} ファイル` : ''}</div>` : ''}</div>
       </div>
       ${(multi ? coverSources(d).length : d.preview) ? `<div class="card-thumb${multi && coverSources(d).length > 1 ? ' two' : ''}" data-id="${esc(d.id)}"></div>` : ''}
       <div class="card-body">
@@ -1904,7 +1940,10 @@ function renderDetailSide(d) {
         ${multi ? '' : `<label class="chk"><input type="checkbox" id="dsRename" ${renameWithTitle ? 'checked' : ''}> 保存するファイル名も資料名に合わせる</label>
         <span class="form-hint">現在のファイル名：${esc(d.originalName)}</span>`}
       </div>
-      <div class="form-row"><label>メインの使用者</label><select id="dsUser">${userOptions(d.user || '', false)}</select></div>
+      <div class="form-2col">
+        <div class="form-row"><label>メインの使用者</label><select id="dsUser">${userOptions(d.user || '', false)}</select></div>
+        <div class="form-row"><label>用紙サイズ</label><select id="dsPaper"><option value="">（未設定）</option>${PAPERS.map(x => `<option value="${x.id}"${d.paper === x.id ? ' selected' : ''}>${x.label}</option>`).join('')}</select></div>
+      </div>
       ${(!multi && d.kind === 'excel' && sheets.length > 1) ? `
       <div class="form-row">
         <label>大きく表示するシート</label>
@@ -2070,10 +2109,11 @@ async function renameStoredFile(d) {
 
 async function handleDetailSave(closeAfter) {
   const d = state.docs.find(x => x.id === detailId); if (!d) return;
-  const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, memo: d.memo, user: d.user || '', orientation: d.orientation || '', updatedAt: d.updatedAt }));
+  const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, memo: d.memo, user: d.user || '', paper: d.paper || '', updatedAt: d.updatedAt }));
   d.title = document.getElementById('dsTitle').value.trim() || d.originalName;
   d.categoryId = document.getElementById('dsCat').value || '';
   d.user = document.getElementById('dsUser').value || '';
+  d.paper = document.getElementById('dsPaper').value || '';
   d.updatedAt = new Date().toISOString();
   const savedSheet = (d.preview && d.preview.sheet) || '';
   const sheetChanged = !isMulti(d) && d.kind === 'excel' && pendingSheet && pendingSheet !== savedSheet;
