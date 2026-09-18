@@ -472,6 +472,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <div class="modal-header"><h2>✏️ 資料情報の編集</h2><button class="btn-close" onclick="closeModal('editModal')">×</button></div>
     <div class="modal-body">
       <div class="form-row"><label>資料名</label><input type="text" id="edTitle"></div>
+      <div class="form-row" id="edSheetRow" style="display:none">
+        <label>大きく表示するシート（プレビュー画像）</label>
+        <select id="edSheet"></select>
+        <span class="form-hint">変更して保存すると、そのシートの見た目で画像を作り直します。</span>
+      </div>
       <div class="form-row">
         <label>カテゴリ</label>
         <div class="inline-add"><select id="edCat"></select><button type="button" onclick="quickAddCat('edCat')">＋新規</button></div>
@@ -505,7 +510,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.1.0';
+const APP_VERSION = 'v1.3.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -731,6 +736,244 @@ function analyzeWorkbook(buf, ext) {
   };
 }
 
+/* ---- ExcelJS を必要なときだけ読み込む ---- */
+const EXCELJS_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+let exceljsPromise = null;
+function loadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (!exceljsPromise) {
+    exceljsPromise = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = EXCELJS_URL;
+      sc.onload = () => resolve(window.ExcelJS);
+      sc.onerror = () => { exceljsPromise = null; reject(new Error('Excel書式ライブラリの読み込みに失敗しました')); };
+      document.head.appendChild(sc);
+    });
+  }
+  return exceljsPromise;
+}
+
+/* ---- Excelの見た目(結合・罫線・色・列幅)そのままで画像を作る ---- */
+const STY_ROW_MAX = 80, STY_COL_MAX = 30;
+const THEME_COLORS = ['FFFFFF', '000000', 'E7E6E6', '44546A', '4472C4', 'ED7D31', 'A5A5A5', 'FFC000', '5B9BD5', '70AD47'];
+function applyTint(hex, tint) {
+  if (!tint) return hex;
+  const ch = i => parseInt(hex.substr(i * 2, 2), 16);
+  const conv = v => {
+    const x = tint < 0 ? v * (1 + tint) : v * (1 - tint) + 255 * tint;
+    return Math.max(0, Math.min(255, Math.round(x)));
+  };
+  return [conv(ch(0)), conv(ch(1)), conv(ch(2))].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+function argb2css(c) {
+  if (!c) return null;
+  if (c.argb) {
+    const a = String(c.argb);
+    const hex = a.length === 8 ? a.slice(2) : a;          // alphaは無視(00でも不透明として扱う)
+    return '#' + hex;
+  }
+  if (c.theme !== undefined && THEME_COLORS[c.theme]) return '#' + applyTint(THEME_COLORS[c.theme], c.tint || 0);
+  return null;
+}
+function fmtCellValue(cell) {
+  const v = cell.value;
+  if (v == null) return '';
+  const nf = String(cell.numFmt || '');
+  if (v instanceof Date) {
+    const p = n => String(n).padStart(2, '0');
+    if (/yy/i.test(nf)) return `${v.getFullYear()}/${p(v.getMonth() + 1)}/${p(v.getDate())}`;
+    if (/[hs]/.test(nf) && !/m\/d/i.test(nf)) return `${p(v.getHours())}:${p(v.getMinutes())}`;
+    return `${v.getMonth() + 1}/${v.getDate()}`;
+  }
+  if (typeof v === 'object') {
+    if (v.richText) return v.richText.map(t => t.text).join('');
+    if (v.text) return String(v.text);
+    if ('result' in v) return v.result == null ? '' : fmtNumByFmt(v.result, nf);
+    if (v.hyperlink) return String(v.text || v.hyperlink);
+    return '';
+  }
+  if (typeof v === 'number') return fmtNumByFmt(v, nf);
+  return String(v);
+}
+function fmtNumByFmt(v, nf) {
+  if (typeof v !== 'number') return String(v == null ? '' : v);
+  if (/%/.test(nf)) return (v * 100).toFixed((nf.split('.')[1] || '').replace(/[^0]/g, '').length) + '%';
+  const dec = /\.(0+)/.exec(nf);
+  const opt = { minimumFractionDigits: dec ? dec[1].length : 0, maximumFractionDigits: dec ? dec[1].length : 10 };
+  const body = /#,##/.test(nf) ? v.toLocaleString('ja-JP', opt) : (dec ? v.toFixed(dec[1].length) : String(v));
+  if (/[¥￥]/.test(nf)) return '¥' + body;
+  return body;
+}
+function wrapLines(ctx, text, maxW, maxLines, wrap) {
+  const hard = String(text).split('\n');
+  if (!wrap) return hard.slice(0, maxLines);
+  const out = [];
+  for (const part of hard) {
+    let line = '';
+    for (const ch of part) {
+      if (ctx.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; if (out.length >= maxLines) return out; }
+      else line += ch;
+    }
+    out.push(line);
+    if (out.length >= maxLines) return out.slice(0, maxLines);
+  }
+  return out.slice(0, maxLines);
+}
+
+async function renderStyledSheetImage(buf, sheetName) {
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  let ws = sheetName ? wb.worksheets.find(w => w.name === sheetName) : null;
+  if (!ws) ws = wb.worksheets.filter(w => w.state !== 'hidden').sort((a, b) => (b.actualRowCount || 0) * (b.actualColumnCount || 0) - (a.actualRowCount || 0) * (a.actualColumnCount || 0))[0];
+  if (!ws) return null;
+  const dim = ws.dimensions || {};
+  const rowCount = Math.min(dim.bottom || ws.rowCount || 0, STY_ROW_MAX);
+  const colCount = Math.min(dim.right || ws.columnCount || 0, STY_COL_MAX);
+  if (!rowCount || !colCount) return null;
+  const truncR = (dim.bottom || 0) > rowCount, truncC = (dim.right || 0) > colCount;
+
+  const defColW = ws.properties && ws.properties.defaultColWidth || 8.43;
+  const defRowH = (ws.properties && ws.properties.defaultRowHeight) || 15;
+  const colW = [], rowH = [];
+  for (let c = 1; c <= colCount; c++) {
+    const col = ws.getColumn(c);
+    const w = (col && col.hidden) ? 0 : ((col && col.width) || defColW);
+    colW.push(Math.round(w * 7.2) + 5);
+  }
+  for (let r = 1; r <= rowCount; r++) {
+    const row = ws.getRow(r);
+    const h = (row && row.hidden) ? 0 : ((row && row.height) || defRowH);
+    rowH.push(Math.max(Math.round(h * 4 / 3), 0));
+  }
+  // 結合セル
+  const merges = (ws.model && ws.model.merges) || [];
+  const covered = new Set(), master = new Map();
+  for (const m of merges) {
+    const mm = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m);
+    if (!mm) continue;
+    const c1 = XLSX.utils.decode_col(mm[1]) + 1, r1 = +mm[2], c2 = XLSX.utils.decode_col(mm[3]) + 1, r2 = +mm[4];
+    master.set(`${r1},${c1}`, { r2: Math.min(r2, rowCount), c2: Math.min(c2, colCount) });
+    for (let r = r1; r <= Math.min(r2, rowCount); r++)
+      for (let c = c1; c <= Math.min(c2, colCount); c++)
+        if (!(r === r1 && c === c1)) covered.add(`${r},${c}`);
+  }
+  const xs = [0], ys = [0];
+  colW.forEach(w => xs.push(xs[xs.length - 1] + w));
+  rowH.forEach(h => ys.push(ys[ys.length - 1] + h));
+  const PAD = 16, noteH = (truncR || truncC) ? 26 : 0;
+  const W = xs[colCount] + PAD * 2, H = ys[rowCount] + PAD * 2 + noteH;
+  const scale = Math.min(2, 3800 / Math.max(W, H));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
+  const ctx = cv.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+
+  // 罫線がほとんど無いシートは薄いグリッドを引く
+  let borderCells = 0, checked = 0;
+  for (let r = 1; r <= Math.min(rowCount, 30); r++) for (let c = 1; c <= Math.min(colCount, 15); c++) {
+    const b = ws.getCell(r, c).border; checked++;
+    if (b && (b.top || b.left || b.right || b.bottom)) borderCells++;
+  }
+  if (checked && borderCells / checked < 0.15) {
+    ctx.strokeStyle = '#e8e6e2'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let r = 0; r <= rowCount; r++) { const y = PAD + ys[r] + .5; ctx.moveTo(PAD, y); ctx.lineTo(PAD + xs[colCount], y); }
+    for (let c = 0; c <= colCount; c++) { const x = PAD + xs[c] + .5; ctx.moveTo(x, PAD); ctx.lineTo(x, PAD + ys[rowCount]); }
+    ctx.stroke();
+  }
+
+  // セル(塗り→文字)
+  for (let r = 1; r <= rowCount; r++) {
+    for (let c = 1; c <= colCount; c++) {
+      if (covered.has(`${r},${c}`)) continue;
+      const span = master.get(`${r},${c}`);
+      const x = PAD + xs[c - 1], y = PAD + ys[r - 1];
+      const w = (span ? xs[span.c2] : xs[c]) - xs[c - 1];
+      const h = (span ? ys[span.r2] : ys[r]) - ys[r - 1];
+      if (w <= 0 || h <= 0) continue;
+      const cell = ws.getCell(r, c);
+      const fill = cell.fill && cell.fill.type === 'pattern' ? argb2css(cell.fill.fgColor) : null;
+      if (fill) { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); }
+      const text = fmtCellValue(cell);
+      if (!text) continue;
+      const f = cell.font || {};
+      const size = Math.max(9, Math.round((f.size || 11) * 4 / 3));
+      ctx.font = `${f.italic ? 'italic ' : ''}${f.bold ? 'bold ' : ''}${size}px "Noto Sans JP", "DM Sans", sans-serif`;
+      ctx.fillStyle = argb2css(f.color) || '#000';
+      const al = cell.alignment || {};
+      const isNum = typeof cell.value === 'number';
+      const ha = al.horizontal || (isNum ? 'right' : 'left');
+      const va = al.vertical || 'bottom';
+      const lineH = Math.round(size * 1.35);
+      const lines = wrapLines(ctx, text, w - 8, Math.max(1, Math.floor((h - 2) / lineH)), !!al.wrapText);
+      const totalH = lines.length * lineH;
+      let ty = va === 'middle' ? y + (h - totalH) / 2 + lineH * .78 : va === 'top' ? y + 3 + lineH * .78 : y + h - totalH + lineH * .78 - 3;
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+      ctx.textAlign = ha === 'center' ? 'center' : ha === 'right' ? 'right' : 'left';
+      const tx = ha === 'center' ? x + w / 2 : ha === 'right' ? x + w - 4 : x + 4;
+      lines.forEach(ln => { ctx.fillText(ln, tx, ty); ty += lineH; });
+      ctx.restore();
+    }
+  }
+  // 罫線（結合セルは外周だけ引く）
+  const BW = { thin: 1, hair: 1, dotted: 1, dashed: 1, medium: 2, thick: 3, double: 2 };
+  ctx.lineCap = 'butt';
+  for (let r = 1; r <= rowCount; r++) {
+    for (let c = 1; c <= colCount; c++) {
+      if (covered.has(`${r},${c}`)) continue;
+      const b = ws.getCell(r, c).border;
+      if (!b) continue;
+      const sp = master.get(`${r},${c}`);
+      const x1 = PAD + xs[c - 1], x2 = PAD + (sp ? xs[sp.c2] : xs[c]), y1 = PAD + ys[r - 1], y2 = PAD + (sp ? ys[sp.r2] : ys[r]);
+      const seg = [['top', x1, y1, x2, y1], ['bottom', x1, y2, x2, y2], ['left', x1, y1, x1, y2], ['right', x2, y1, x2, y2]];
+      for (const [k, ax, ay, bx, by] of seg) {
+        const s = b[k]; if (!s || !s.style) continue;
+        ctx.strokeStyle = argb2css(s.color) || '#000';
+        ctx.lineWidth = BW[s.style] || 1;
+        ctx.beginPath(); ctx.moveTo(ax + .5, ay + .5); ctx.lineTo(bx + .5, by + .5); ctx.stroke();
+      }
+    }
+  }
+  if (noteH) {
+    ctx.fillStyle = '#9ca3af'; ctx.font = '12px "Noto Sans JP", sans-serif'; ctx.textAlign = 'left';
+    const parts = [];
+    if (truncR) parts.push(`全${dim.bottom}行のうち先頭${rowCount}行`);
+    if (truncC) parts.push(`全${dim.right}列のうち左${colCount}列`);
+    ctx.fillText('※ ' + parts.join(' / ') + ' を表示', PAD, H - 10);
+  }
+  return new Promise(resolve => cv.toBlob(b => resolve(b ? { blob: b, w: Math.round(W), h: Math.round(H), sheet: ws.name } : null), 'image/png'));
+}
+
+/* ---- プレビュー画像の作成（まず書式ありで、ダメなら簡易描画） ---- */
+async function makePreviewImage(buf, ext, analysis, sheetName) {
+  const target = sheetName || (analysis.summary.excel || {}).mainSheet;
+  if (ext === 'xlsx' || ext === 'xlsm') {
+    try {
+      const img = await renderStyledSheetImage(buf.slice(0), target);
+      if (img) return img;
+    } catch (e) { console.warn('書式つきプレビューに失敗、簡易描画にします', e); }
+  }
+  const src = (sheetName && analysis.previewSource && analysis.previewSource.name !== sheetName)
+    ? sheetSource(buf.slice(0), ext, sheetName) : analysis.previewSource;
+  return renderSheetImage(src);
+}
+// 指定シートを簡易描画用のデータにする
+function sheetSource(buf, ext, sheetName) {
+  const wb = readWorkbook(buf, ext);
+  const ws = wb.Sheets[sheetName];
+  if (!ws || !ws['!ref']) return null;
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false, raw: false })
+    .filter(r => r.some(c => cellStr(c) !== ''));
+  return { name: sheetName, rows, headerIdx: pickHeaderIdx(rows) };
+}
+function pickHeaderIdx(rows) {
+  let hIdx = 0, best = -1;
+  rows.slice(0, 5).forEach((r, i) => { const n = r.filter(c => cellStr(c) !== '').length; if (n > best) { best = n; hIdx = i; } });
+  return hIdx;
+}
+
+/* ---- 書式が読めないファイル(.xls/.csv)用のかんたん描画 ---- */
 /* ---- 表を画像(PNG)に描く ---- */
 function renderSheetImage(src) {
   if (!src || !src.rows.length) return Promise.resolve(null);
@@ -1098,25 +1341,31 @@ function setupThumbs() {
   }, { rootMargin: '200px' });
   targets.forEach(t => thumbObserver.observe(t));
 }
-// 既存の資料にあとからプレビュー画像を作る
-async function rebuildPreview(id) {
+// プレビュー画像を作ってGitHubに保存する（シート指定可）
+async function savePreviewFor(d, sheetName) {
+  const buf = await getDocBuffer(d);
+  const a = analyzeWorkbook(buf.slice(0), d.ext);
+  const img = await makePreviewImage(buf.slice(0), d.ext, a, sheetName);
+  if (!img) throw new Error('画像にできる表が見つかりませんでした');
+  const ipath = (d.preview && d.preview.path) || `${DATA_DIR}/previews/${d.id}.png`;
+  const content = await fileToBase64(new File([img.blob], 'p.png', { type: 'image/png' }));
+  const body = { message: `preview: ${d.originalName}`, content, branch: auth.branch };
+  if (d.preview && d.preview.sha) body.sha = d.preview.sha;
+  const res = await ghFetch(`contents/${encPath(ipath)}`, { method: 'PUT', body: JSON.stringify(body) });
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || 'プレビュー画像の保存に失敗しました'); }
+  d.preview = { path: ipath, sha: (await res.json()).content.sha, w: img.w, h: img.h, sheet: img.sheet || sheetName || a.previewSource.name };
+  d.summary = a.summary;
+  imgCache.delete(d.id);
+  return d.preview;
+}
+// 既存の資料にあとからプレビュー画像を作る／作り直す
+async function rebuildPreview(id, sheetName) {
   const d = state.docs.find(x => x.id === id);
   if (!d || d.kind !== 'excel') return;
   showLoading('プレビュー画像を作成中...');
   try {
-    const buf = await getDocBuffer(d);
-    const a = analyzeWorkbook(buf.slice(0), d.ext);
-    const img = await renderSheetImage(a.previewSource);
-    if (!img) throw new Error('画像にできる表が見つかりませんでした');
-    const ipath = (d.preview && d.preview.path) || `${DATA_DIR}/previews/${d.id}.png`;
-    const content = await fileToBase64(new File([img.blob], 'p.png', { type: 'image/png' }));
-    const body = { message: `preview: ${d.originalName}`, content, branch: auth.branch };
-    if (d.preview && d.preview.sha) body.sha = d.preview.sha;
-    const res = await ghFetch(`contents/${encPath(ipath)}`, { method: 'PUT', body: JSON.stringify(body) });
-    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || '保存失敗'); }
-    d.preview = { path: ipath, sha: (await res.json()).content.sha, w: img.w, h: img.h, sheet: a.previewSource.name };
-    d.summary = a.summary; d.updatedAt = new Date().toISOString();
-    imgCache.delete(d.id);
+    await savePreviewFor(d, sheetName || (d.preview && d.preview.sheet));
+    d.updatedAt = new Date().toISOString();
     await saveData(`preview: ${d.originalName}`);
     toast('プレビュー画像を作りました', 'success');
     renderAll(); openDetail(d.id);
@@ -1224,7 +1473,7 @@ function renderExcelTabs(d, sheetIdx) {
       previewImageUrl(d).then(url => {
         const box = document.getElementById('pvImage');
         if (!box || detailId !== d.id || !url) return;
-        box.innerHTML = `<div class="pv-image-head">🖼️ ${esc(d.preview.sheet || '')} の中身<button class="btn-icon" onclick="openImageFull('${esc(d.id)}')">🔍 別タブで拡大</button><button class="btn-icon" onclick="rebuildPreview('${esc(d.id)}')">🔄 作り直す</button></div><img src="${url}" alt="プレビュー" style="width:${d.preview.w ? d.preview.w + 'px' : '100%'};max-width:100%" onclick="openImageFull('${esc(d.id)}')">`;
+        box.innerHTML = `<div class="pv-image-head">🖼️ ${esc(d.preview.sheet || '')} の中身<button class="btn-icon" onclick="openImageFull('${esc(d.id)}')">🔍 別タブで拡大</button><button class="btn-icon" onclick="rebuildPreview('${esc(d.id)}')">🔄 作り直す</button>${(((d.summary.excel || {}).sheets || []).length > 1) ? `<button class="btn-icon" onclick="openEdit('${esc(d.id)}')">🔀 シートを変える</button>` : ''}</div><img src="${url}" alt="プレビュー" style="width:100%;max-width:${Math.round((d.preview.w || 800) * 1.6)}px" onclick="openImageFull('${esc(d.id)}')">`;
       }).catch(e => { const box = document.getElementById('pvImage'); if (box) box.innerHTML = `<div class="pv-loading">⚠️ 画像を読み込めませんでした</div>`; });
     }
     return;
@@ -1340,11 +1589,11 @@ async function handleUpload() {
       let preview = null;
       if (u.analysis.previewSource) {
         try {
-          const img = await renderSheetImage(u.analysis.previewSource);
+          const img = await makePreviewImage(await u.file.arrayBuffer(), u.ext, u.analysis);
           if (img) {
             const ipath = `${DATA_DIR}/previews/${id}.png`;
             const isha = await uploadFileToGitHub(ipath, new File([img.blob], `${id}.png`, { type: 'image/png' }));
-            preview = { path: ipath, sha: isha, w: img.w, h: img.h, sheet: u.analysis.previewSource.name };
+            preview = { path: ipath, sha: isha, w: img.w, h: img.h, sheet: img.sheet || u.analysis.previewSource.name };
           }
         } catch (e) { console.warn('プレビュー画像の作成に失敗', e); }
       }
@@ -1383,6 +1632,14 @@ function openEdit(id) {
   document.getElementById('edCat').innerHTML = catOptions(d.categoryId || '', false);
   document.getElementById('edTags').value = (d.tags || []).join(', ');
   document.getElementById('edMemo').value = d.memo || '';
+  const row = document.getElementById('edSheetRow'), sel = document.getElementById('edSheet');
+  const sheets = (d.summary && d.summary.excel && d.summary.excel.sheets) || [];
+  if (d.kind === 'excel' && sheets.length) {
+    const cur = (d.preview && d.preview.sheet) || (d.summary.excel.mainSheet || sheets[0].name);
+    sel.innerHTML = sheets.map(x => `<option value="${esc(x.name)}"${x.name === cur ? ' selected' : ''}>${esc(x.name)}（${fmtNum(x.rows)}行×${x.cols}列）${x.hidden ? ' ※非表示シート' : ''}</option>`).join('');
+    sel.value = cur;
+    row.style.display = sheets.length > 1 ? '' : 'none';
+  } else row.style.display = 'none';
   showModal('editModal');
 }
 async function handleSaveEdit() {
@@ -1393,8 +1650,16 @@ async function handleSaveEdit() {
   d.tags = parseTags(document.getElementById('edTags').value);
   d.memo = document.getElementById('edMemo').value.trim();
   d.updatedAt = new Date().toISOString();
+  const row = document.getElementById('edSheetRow');
+  const newSheet = row.style.display === 'none' ? null : document.getElementById('edSheet').value;
+  const curSheet = (d.preview && d.preview.sheet) || (d.summary.excel && d.summary.excel.mainSheet);
   showLoading('保存中...');
   try {
+    if (newSheet && newSheet !== curSheet) {
+      showLoading(`「${newSheet}」の画像を作成中...`);
+      await savePreviewFor(d, newSheet);
+      showLoading('保存中...');
+    }
     await saveData(`edit: ${d.originalName}`);
     closeModal('editModal'); toast('保存しました', 'success');
     renderAll();
