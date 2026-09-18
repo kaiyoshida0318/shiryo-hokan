@@ -156,6 +156,8 @@ button { font-family: inherit; }
 }
 .file-icon.word { background: var(--word-bg); color: var(--word-text); }
 .file-icon.excel { background: var(--excel-bg); color: var(--excel-text); }
+.file-icon.pack { background: var(--primary-light); color: var(--primary-dark); font-size: 20px; }
+.card.multi .card-head { border-top-color: var(--primary); }
 .card-titles { min-width: 0; flex: 1; }
 .card-name { font-size: 15px; font-weight: 700; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-file { font-size: 11px; color: var(--text-light); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, monospace; }
@@ -270,6 +272,22 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .side-edit { background: var(--bg); }
 .side-title { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
 .side-edit .form-row:last-of-type { margin-bottom: 16px; }
+.type-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.type-seg button { padding: 12px; border: 2px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 14px; font-weight: 600; color: var(--text-muted); cursor: pointer; text-align: center; transition: all .15s; }
+.type-seg button small { display: block; font-size: 11px; font-weight: 400; margin-top: 3px; }
+.type-seg button:hover { border-color: var(--primary); }
+.type-seg button.active { border-color: var(--primary); background: var(--primary-light); color: var(--primary-dark); }
+.type-seg.mini button { padding: 7px 10px; font-size: 12px; }
+.type-seg.mini button small { display: none; }
+.cover-box { text-align: center; }
+.cover-box img { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
+.file-row { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
+.file-row .file-icon { width: 34px; height: 34px; font-size: 10px; }
+.file-row input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
+.file-row .fr-size { font-size: 11px; color: var(--text-light); white-space: nowrap; font-family: ui-monospace, monospace; }
+.file-row button { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
+.file-row button:hover { background: var(--bg); }
+.multi-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--primary-light); color: var(--primary-dark); }
 .save-row { display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px; }
 .save-row .btn-add { padding: 10px 8px; }
 .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 6px; cursor: pointer; }
@@ -435,10 +453,15 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   <div class="modal" style="max-width:760px">
     <div class="modal-header"><h2>📥 資料をアップ</h2><button class="btn-close" onclick="closeUpload()">×</button></div>
     <div class="modal-body">
+      <div class="type-seg" id="upTypeSeg">
+        <button class="active" data-t="single" onclick="setUpType('single')">📄 単一資料<small>1ファイル＝1資料</small></button>
+        <button data-t="multi" onclick="setUpType('multi')">📚 複数資料<small>何枚かをまとめて1資料</small></button>
+      </div>
+      <div class="form-row" id="upTitleRow" style="display:none"><label>資料名（まとめた資料の名前）</label><input type="text" id="upTitle" placeholder="例: 2026年パッケージ一式"></div>
       <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
         <div class="dz-icon">📄</div>
         <div class="dz-title">クリックしてファイルを選択／ここにドラッグ＆ドロップ</div>
-        <div class="dz-desc">Word（.docx / .doc）・Excel（.xlsx / .xls / .xlsm / .csv）　複数まとめてOK</div>
+        <div class="dz-desc">Word（.docx / .doc）・Excel（.xlsx / .xls / .xlsm / .csv）　複数まとめてOK<br><span id="dzHint"></span></div>
       </div>
       <input type="file" id="fileInput" multiple accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="addUploadFiles(this.files); this.value=''">
       <div class="up-list" id="upList"></div>
@@ -508,7 +531,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.11.0';
+const APP_VERSION = 'v2.0.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -530,6 +553,8 @@ let state = { docs: [], categories: [], settings: { users: [...DEFAULT_USERS] },
 let currentTab = 'docs';
 let filterKind = 'all', filterCat = 'all', filterUser = 'all', searchText = '', sortKey = 'new', viewMode = 'card';
 let uploads = [];          // アップロード待ちファイル
+let upType = 'single';     // 'single' | 'multi'
+let upCoverFile = null;
 let editingCatId = null, detailId = null, pendingSheet = '', renameWithTitle = true;
 
 /* ==================== GitHub helpers ==================== */
@@ -967,7 +992,7 @@ async function renderStyledSheetImage(buf, sheetName) {
 
 /* ---- プレビュー画像の作成（まず書式ありで、ダメなら簡易描画） ---- */
 async function makePreviewImage(buf, ext, analysis, sheetName) {
-  const target = sheetName || (analysis.summary.excel || {}).mainSheet;
+  const target = sheetName || ((analysis.summary || {}).excel || {}).mainSheet;
   if (ext === 'xlsx' || ext === 'xlsm') {
     try {
       const img = await renderStyledSheetImage(buf.slice(0), target);
@@ -1226,11 +1251,14 @@ function catOptions(selected, withAll) {
 }
 
 function matchDoc(d, words) {
-  const hay = [d.title, d.originalName, (d.tags || []).join(' '), d.memo, catName(d.categoryId), d.user || '', d.searchText].join('\n').toLowerCase();
+  const parts = [d.title, d.memo, catName(d.categoryId), d.user || ''];
+  if (isMulti(d)) (d.files || []).forEach(f => parts.push(f.title, f.originalName, f.searchText));
+  else parts.push(d.originalName, d.searchText);
+  const hay = parts.join('\n').toLowerCase();
   return words.every(w => hay.includes(w));
 }
 function snippetOf(d, words) {
-  const src = d.searchText || '';
+  const src = isMulti(d) ? (d.files || []).map(f => f.searchText || '').join('\n') : (d.searchText || '');
   const low = src.toLowerCase();
   for (const w of words) {
     const i = low.indexOf(w);
@@ -1244,7 +1272,7 @@ function snippetOf(d, words) {
 function filteredDocs() {
   const words = searchText.toLowerCase().split(/\s+/).filter(Boolean);
   let list = state.docs.filter(d =>
-    (filterKind === 'all' || d.kind === filterKind) &&
+    (filterKind === 'all' || (isMulti(d) ? (d.files || []).some(f => f.kind === filterKind) : d.kind === filterKind)) &&
     (filterCat === 'all' || (filterCat === 'none' ? !d.categoryId : d.categoryId === filterCat)) &&
     (filterUser === 'all' || (filterUser === 'none' ? !d.user : d.user === filterUser)) &&
     (!words.length || matchDoc(d, words)));
@@ -1255,6 +1283,11 @@ function filteredDocs() {
 }
 
 function summaryHtml(d, compact) {
+  if (isMulti(d)) {
+    const fs = d.files || [];
+    if (compact) return '';
+    return `<div><div class="sum-label">ファイル</div><div class="col-list">${fs.slice(0, 8).map(f => esc(f.title)).join(' ／ ')}${fs.length > 8 ? ` ほか${fs.length - 8}件` : ''}</div></div>`;
+  }
   const s = d.summary || {};
   if (d.kind === 'word') {
     const w = s.word || {};
@@ -1281,6 +1314,7 @@ function summaryHtml(d, compact) {
   return '';
 }
 function metaCounts(d) {
+  if (isMulti(d)) return `${(d.files || []).length}ファイル`;
   const s = d.summary || {};
   if (d.kind === 'word') { const w = s.word || {}; return w.unsupported ? '—' : `${fmtNum(w.charCount)}字`; }
   const sh = (s.excel && s.excel.sheets) || [];
@@ -1310,7 +1344,7 @@ function renderDocs() {
       list.map(d => {
         const snip = words.length ? snippetOf(d, words) : '';
         return `<tr class="clickable" onclick="openDetail('${esc(d.id)}')">
-          <td><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span></td>
+          <td>${isMulti(d) ? '<span class="multi-badge">📚 複数</span>' : `<span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span>`}</td>
           <td class="col-name">${highlight(d.title, searchText)}</td>
           <td class="nowrap">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : '<span class="muted">—</span>'}</td>
           <td class="nowrap">${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : '<span class="muted">—</span>'}</td>
@@ -1325,22 +1359,24 @@ function renderDocs() {
   }
   el.innerHTML = `<div class="grid">${list.map(d => {
     const snip = words.length ? snippetOf(d, words) : '';
-    return `<div class="card ${d.kind}" onclick="openDetail('${esc(d.id)}')">
+    const multi = isMulti(d);
+    return `<div class="card ${multi ? 'multi' : d.kind}" onclick="openDetail('${esc(d.id)}')">
       <div class="card-head">
-        <div class="file-icon ${d.kind}">${extLabel(d.ext)}</div>
-        <div class="card-titles"><div class="card-name">${highlight(d.title, searchText)}</div></div>
+        <div class="file-icon ${multi ? 'pack' : d.kind}">${multi ? '📚' : extLabel(d.ext)}</div>
+        <div class="card-titles"><div class="card-name">${highlight(d.title, searchText)}</div>${multi ? `<div class="card-file">${(d.files || []).length} ファイル</div>` : ''}</div>
       </div>
-      ${d.preview ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
+      ${(multi ? d.cover : d.preview) ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
       <div class="card-body">
         ${(d.categoryId || d.user || d.orientation) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : ''}${d.orientation ? `<span class="tag-chip">📄 ${esc(d.orientation)}</span>` : ''}</div>` : ''}
         ${snip ? `<div><div class="sum-label">一致した箇所</div><div class="snippet">${highlight(snip, searchText)}</div></div>` : summaryHtml(d, true)}
       </div>
-      <div class="card-meta"><span>${metaCounts(d)} · ${fmtSize(d.size)}</span><span>${fmtDate(d.createdAt)}</span></div>
+      <div class="card-meta"><span>${metaCounts(d)} · ${fmtSize(docTotalSize(d))}</span><span>${fmtDate(d.createdAt)}</span></div>
     </div>`;
   }).join('')}</div>`;
   setupThumbs();
 }
 function listSummary(d) {
+  if (isMulti(d)) { const fs = d.files || []; return fs.slice(0, 6).map(f => esc(f.title)).join(' ／ ') + (fs.length > 6 ? ` ほか${fs.length - 6}件` : ''); }
   const s = d.summary || {};
   if (d.kind === 'word') {
     const w = s.word || {};
@@ -1372,8 +1408,8 @@ function setupThumbs() {
       const el = en.target; obs.unobserve(el);
       const d = state.docs.find(x => x.id === el.dataset.id);
       try {
-        const url = await previewImageUrl(d);
-        if (url) el.innerHTML = `<img src="${url}" alt="" style="width:${d.preview && d.preview.w ? d.preview.w + 'px' : '100%'};max-width:100%">`;
+        const url = isMulti(d) ? await coverUrl(d) : await previewImageUrl(d);
+        if (url) el.innerHTML = `<img src="${url}" alt="" style="width:${(!isMulti(d) && d.preview && d.preview.w) ? d.preview.w + 'px' : '100%'};max-width:100%">`;
         else el.remove();
       } catch (e) { el.remove(); }
     });
@@ -1423,28 +1459,89 @@ async function openDetail(id) {
   const d = state.docs.find(x => x.id === id);
   if (!d) return;
   detailId = id;
-  pendingSheet = (d.preview && d.preview.sheet) || ((d.summary.excel || {}).mainSheet) || '';
-  document.getElementById('detailTitle').textContent = `${d.kind === 'word' ? '📘' : '📗'} ${d.title}`;
+  pendingSheet = (d.preview && d.preview.sheet) || (((d.summary || {}).excel || {}).mainSheet) || '';
+  document.getElementById('detailTitle').textContent = `${isMulti(d) ? '📚' : (d.kind === 'word' ? '📘' : '📗')} ${d.title}`;
   renderDetailSide(d);
   showModal('detailModal');
-  if (d.kind === 'word') renderWordTabs(d, 0); else renderExcelTabs(d, 0);
+  if (isMulti(d)) renderMultiTabs(d, 0);
+  else if (d.kind === 'word') renderWordTabs(d, 0);
+  else renderExcelTabs(d, 0);
+}
+
+/* ---- 複数資料の左ペイン（表紙＋各ファイル） ---- */
+function renderMultiTabs(d, idx) {
+  const files = d.files || [];
+  window._mTab = i => { if (detailId === d.id) renderMultiTabs(d, i); };
+  setPvTabs(['🖼️ 表紙', ...files.map(f => `${f.kind === 'word' ? '📘' : '📗'} ${f.title}`)], idx, '_mTab');
+  const body = document.getElementById('pvBody');
+  if (idx === 0) {
+    body.innerHTML = `<div class="cover-box" id="coverBox"><div class="pv-loading">⏳ 読み込み中...</div></div>`;
+    (async () => {
+      const box = document.getElementById('coverBox');
+      if (!box || detailId !== d.id) return;
+      const url = d.cover ? await coverUrl(d).catch(() => null) : null;
+      if (!box || detailId !== d.id) return;
+      box.innerHTML = url
+        ? `<div class="pv-image-head">🖼️ 表紙<button class="btn-icon" onclick="document.getElementById('coverInput').click()">🔄 変更</button></div>
+           <img src="${url}" alt="表紙">
+           <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="if(this.files[0])setCoverImage(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files[0]); this.value=''">`
+        : `<div class="replace-zone" style="padding:60px 20px" onclick="document.getElementById('coverInput').click()">
+             <div class="rz-icon">🖼️</div>
+             <div class="rz-title">表紙にする画像を登録</div>
+             <div class="rz-desc">クリックして選択／ここに画像をドラッグ＆ドロップ<br>一覧のサムネイルにも使われます</div>
+           </div>
+           <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="if(this.files[0])setCoverImage(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files[0]); this.value=''">`;
+    })();
+    return;
+  }
+  const f = files[idx - 1];
+  if (!f) return;
+  body.innerHTML = '<div class="pv-loading">⏳ 読み込み中...</div>';
+  (async () => {
+    try {
+      const buf = await fileBuffer(f);
+      if (detailId !== d.id) return;
+      if (f.kind === 'word') {
+        const res = await mammoth.convertToHtml({ arrayBuffer: buf.slice(0) });
+        const dom = new DOMParser().parseFromString(res.value, 'text/html');
+        dom.querySelectorAll('script,iframe,object,embed').forEach(n => n.remove());
+        dom.querySelectorAll('*').forEach(n => [...n.attributes].forEach(a => { if (/^on/i.test(a.name) || (a.name === 'href' && /^\s*javascript:/i.test(a.value))) n.removeAttribute(a.name); }));
+        body.innerHTML = `<div class="doc-preview">${dom.body.innerHTML || '<p class="muted">本文なし</p>'}</div>`;
+      } else {
+        const a = analyzeWorkbook(buf.slice(0), f.ext);
+        const img = await makePreviewImage(buf.slice(0), f.ext, a);
+        if (detailId !== d.id) return;
+        if (!img) { body.innerHTML = '<div class="pv-loading">表示できる表がありません</div>'; return; }
+        const url = URL.createObjectURL(img.blob);
+        body.innerHTML = `<div class="pv-image"><div class="pv-image-head">🖼️ ${esc(img.sheet || '')} の中身<button class="btn-icon" onclick="window.open('${url}','_blank')">🔍 拡大</button></div>
+          <img src="${url}" alt="プレビュー" style="width:100%;max-width:${Math.round((img.w || 800) * 1.6)}px" onclick="window.open('${url}','_blank')"></div>`;
+      }
+    } catch (e) { body.innerHTML = `<div class="pv-loading">⚠️ ${esc(e.message)}</div>`; }
+  })();
 }
 
 function renderDetailSide(d) {
   const s = d.summary || {};
   const sheets = (s.excel && s.excel.sheets) || [];
+  const multi = isMulti(d);
   document.getElementById('detailSide').innerHTML = `
+    <div class="type-seg mini">
+      <button class="${multi ? '' : 'active'}" onclick="changeDocType('${esc(d.id)}','single')">📄 単一資料</button>
+      <button class="${multi ? 'active' : ''}" onclick="changeDocType('${esc(d.id)}','multi')">📚 複数資料</button>
+    </div>
     <div class="side-top">
     <div class="side-col">
     <div class="side-block">
       <div class="side-actions">
-        <button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button>
+        ${multi ? '' : `<button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button>`}
         <button class="btn-icon danger" onclick="handleDeleteDoc('${esc(d.id)}')">🗑️ 削除</button>
       </div>
       <dl class="info-list">
-        <div><dt>ファイル名</dt><dd>${esc(d.originalName)}</dd></div>
-        <div><dt>種類 / サイズ</dt><dd><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span> ${fmtSize(d.size)}</dd></div>
-        <div><dt>ボリューム</dt><dd>${metaCounts(d)}${d.kind === 'word' && s.word && !s.word.unsupported ? `<br><span class="muted">段落 ${fmtNum(s.word.paragraphCount)} / 表 ${s.word.tableCount} / 画像 ${s.word.imageCount}</span>` : ''}</dd></div>
+        ${multi
+          ? `<div><dt>ファイル数</dt><dd>${(d.files || []).length} ファイル（合計 ${fmtSize(docTotalSize(d))}）</dd></div>`
+          : `<div><dt>ファイル名</dt><dd>${esc(d.originalName)}</dd></div>
+             <div><dt>種類 / サイズ</dt><dd><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span> ${fmtSize(d.size)}</dd></div>
+             <div><dt>ボリューム</dt><dd>${metaCounts(d)}${d.kind === 'word' && s.word && !s.word.unsupported ? `<br><span class="muted">段落 ${fmtNum(s.word.paragraphCount)} / 表 ${s.word.tableCount} / 画像 ${s.word.imageCount}</span>` : ''}</dd></div>`}
         <div><dt>登録日</dt><dd>${fmtDate(d.createdAt)}${d.updatedAt && d.updatedAt !== d.createdAt ? ` <span class="muted">（更新 ${fmtDate(d.updatedAt)}）</span>` : ''}</dd></div>
         <div><dt>最終ダウンロード</dt><dd class="dl-line">
           ${d.lastDownloadAt ? `<span>${fmtDateTime(d.lastDownloadAt)}</span><button class="btn-link" onclick="toggleDlHistory()">履歴 (${(d.downloads || []).length})</button>` : '<span class="muted">まだダウンロードされていません</span>'}
@@ -1452,10 +1549,10 @@ function renderDetailSide(d) {
       </dl>
       <div class="dl-history" id="dlHistory" style="display:none">
         <div class="side-title" style="margin-bottom:6px">ダウンロード履歴</div>
-        ${(d.downloads || []).slice().reverse().map(x => `<div class="dl-row"><span>${fmtDateTime(x.at)}</span></div>`).join('') || '<div class="muted">履歴はありません</div>'}
+        ${(d.downloads || []).slice().reverse().map(x => `<div class="dl-row"><span>${fmtDateTime(x.at)}${x.name ? ' ' + esc(x.name) : ''}</span></div>`).join('') || '<div class="muted">履歴はありません</div>'}
       </div>
     </div>
-    <div class="side-block">
+    ${multi ? '' : `<div class="side-block">
       <div class="side-title">🔄 ファイルの差し替え（更新）</div>
       <div class="replace-zone" id="replaceZone" onclick="document.getElementById('replaceInput').click()">
         <div class="rz-icon">📥</div>
@@ -1464,21 +1561,21 @@ function renderDetailSide(d) {
       </div>
       <input type="file" id="replaceInput" accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
       ${(d.updates || []).length ? `<div class="dl-history" style="max-height:120px">${d.updates.slice().reverse().map(x => `<div class="dl-row">${fmtDateTime(x.at)} ${esc(x.name || '')}</div>`).join('')}</div>` : ''}
-    </div>
+    </div>`}
     </div>
     <div class="side-block side-edit">
       <div class="side-title">✏️ 編集</div>
       <div class="form-row">
         <label>資料名</label>
         <input type="text" id="dsTitle" value="${esc(d.title)}">
-        <label class="chk"><input type="checkbox" id="dsRename" ${renameWithTitle ? 'checked' : ''}> 保存するファイル名も資料名に合わせる</label>
-        <span class="form-hint">現在のファイル名：${esc(d.originalName)}</span>
+        ${multi ? '' : `<label class="chk"><input type="checkbox" id="dsRename" ${renameWithTitle ? 'checked' : ''}> 保存するファイル名も資料名に合わせる</label>
+        <span class="form-hint">現在のファイル名：${esc(d.originalName)}</span>`}
       </div>
       <div class="form-2col">
         <div class="form-row"><label>メインの使用者</label><select id="dsUser">${userOptions(d.user || '', false)}</select></div>
         <div class="form-row"><label>PDFの向き</label><select id="dsOri"><option value="">（未設定）</option>${ORIENTATIONS.map(o => `<option value="${o}"${d.orientation === o ? ' selected' : ''}>${o}</option>`).join('')}</select></div>
       </div>
-      ${(d.kind === 'excel' && sheets.length > 1) ? `
+      ${(!multi && d.kind === 'excel' && sheets.length > 1) ? `
       <div class="form-row">
         <label>大きく表示するシート</label>
         <div class="inline-add">
@@ -1496,7 +1593,26 @@ function renderDetailSide(d) {
         <button class="btn-add" onclick="handleDetailSave(true)">保存して閉じる</button>
       </div>
     </div>
-    </div>`;
+    </div>
+    ${multi ? `<div class="side-block">
+      <div class="side-title">📎 この資料のファイル（${(d.files || []).length}）</div>
+      ${(d.files || []).map((f, i) => `
+        <div class="file-row">
+          <div class="file-icon ${f.kind}">${extLabel(f.ext)}</div>
+          <input type="text" value="${esc(f.title)}" onchange="renameMember('${esc(d.id)}','${esc(f.fid)}',this.value)" title="ファイルの名前">
+          <span class="fr-size">${fmtSize(f.size)}</span>
+          <button onclick="_mTab(${i + 1})" title="開く">👁️</button>
+          <button onclick="downloadMember(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="ダウンロード">⬇️</button>
+          <button onclick="removeFileFromDoc(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="削除">🗑️</button>
+        </div>`).join('')}
+      <div class="replace-zone" id="replaceZone" style="margin-top:12px" onclick="document.getElementById('replaceInput').click()">
+        <div class="rz-icon">➕</div>
+        <div class="rz-title">ファイルを追加</div>
+        <div class="rz-desc">クリックして選択／ここにドラッグ＆ドロップ（何枚でもOK）</div>
+      </div>
+      <input type="file" id="replaceInput" multiple accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files.length)addFilesToDoc(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files); this.value=''">
+    </div>` : ''}
+    `;
   const sel = document.getElementById('dsCat'); if (sel) sel.value = d.categoryId || '';
   const us = document.getElementById('dsUser'); if (us) us.value = d.user || '';
 }
@@ -1557,7 +1673,7 @@ async function handleReplaceFile(file) {
     showLoading('保存中...');
     await saveData(`replace: ${file.name}`);
     if (oldPath !== newPath) await deleteFileFromGitHub(oldPath, oldSha);
-    pendingSheet = (d.preview && d.preview.sheet) || ((d.summary.excel || {}).mainSheet) || '';
+    pendingSheet = (d.preview && d.preview.sheet) || (((d.summary || {}).excel || {}).mainSheet) || '';
     toast('ファイルを差し替えました', 'success');
     renderAll(); renderDetailSide(d);
     if (d.kind === 'word') renderWordTabs(d, 0); else renderExcelTabs(d, 0);
@@ -1593,11 +1709,11 @@ async function handleDetailSave(closeAfter) {
   d.memo = document.getElementById('dsMemo').value.trim();
   d.updatedAt = new Date().toISOString();
   const savedSheet = (d.preview && d.preview.sheet) || '';
-  const sheetChanged = d.kind === 'excel' && pendingSheet && pendingSheet !== savedSheet;
+  const sheetChanged = !isMulti(d) && d.kind === 'excel' && pendingSheet && pendingSheet !== savedSheet;
   const renameChk = document.getElementById('dsRename');
   renameWithTitle = renameChk ? renameChk.checked : renameWithTitle;
   try { localStorage.setItem(LS_RENAME, renameWithTitle ? '1' : '0'); } catch (e) {}
-  const wantRename = renameWithTitle && d.title !== backup.title;
+  const wantRename = !isMulti(d) && renameWithTitle && d.title !== backup.title;
   showLoading(sheetChanged ? `「${pendingSheet}」の画像を作成中...` : '保存中...');
   try {
     if (sheetChanged) { await savePreviewFor(d, pendingSheet); showLoading('保存中...'); }
@@ -1606,7 +1722,7 @@ async function handleDetailSave(closeAfter) {
     toast(wantRename ? `保存しました（ファイル名：${d.originalName}）` : '保存しました', 'success');
     renderAll();
     if (closeAfter) { closeModal('detailModal'); detailId = null; return; }
-    document.getElementById('detailTitle').textContent = `${d.kind === 'word' ? '📘' : '📗'} ${d.title}`;
+    document.getElementById('detailTitle').textContent = `${isMulti(d) ? '📚' : (d.kind === 'word' ? '📘' : '📗')} ${d.title}`;
     renderDetailSide(d);
     if (sheetChanged) renderExcelTabs(d, 0);
   } catch (e) { Object.assign(d, backup); toast(e.message, 'error'); renderDetailSide(d); }
@@ -1748,9 +1864,20 @@ async function downloadDoc(id) {
 }
 
 /* ==================== アップロード ==================== */
+function setUpType(t) {
+  upType = t;
+  document.querySelectorAll('#upTypeSeg button').forEach(b => b.classList.toggle('active', b.dataset.t === t));
+  document.getElementById('upTitleRow').style.display = t === 'multi' ? '' : 'none';
+  document.getElementById('dzHint').innerHTML = t === 'multi'
+    ? '複数資料：選んだファイルは<b>1つの資料</b>にまとまります（表紙画像はあとから登録できます）'
+    : '単一資料：ファイル1つにつき1件の資料として登録します';
+  renderUploads();
+}
 function openUpload(files) {
   if (!auth.owner || !auth.repo) { toast('先に⚙️設定でGitHub保存先を登録してください', 'error'); openSettings(); return; }
-  uploads = [];
+  uploads = []; upCoverFile = null;
+  setUpType(upType);
+  const t = document.getElementById('upTitle'); if (t) t.value = '';
   document.getElementById('upCat').innerHTML = catOptions(filterCat !== 'all' && filterCat !== 'none' ? filterCat : '', false);
   document.getElementById('upMemo').value = '';
   renderUploads();
@@ -1798,7 +1925,9 @@ function renderUploads() {
     </div>`).join('');
   const ready = uploads.filter(u => u.status === 'ready').length;
   const busy = uploads.some(u => u.status === 'analyzing' || u.status === 'uploading');
-  document.getElementById('upSummary').textContent = uploads.length ? `保存できる資料 ${ready} 件${busy ? '（処理中…）' : ''}` : '';
+  document.getElementById('upSummary').textContent = uploads.length
+    ? (upType === 'multi' ? `1つの資料に ${ready} ファイル${busy ? '（処理中…）' : ''}` : `保存できる資料 ${ready} 件${busy ? '（処理中…）' : ''}`)
+    : '';
   document.getElementById('upSaveBtn').disabled = !ready || busy;
 }
 async function handleUpload() {
@@ -1808,6 +1937,7 @@ async function handleUpload() {
   const categoryId = document.getElementById('upCat').value || '';
   const memo = document.getElementById('upMemo').value.trim();
   document.getElementById('upSaveBtn').disabled = true;
+  if (upType === 'multi') return handleUploadMulti(targets, categoryId, memo);
   const added = [];
   for (const u of targets) {
     u.status = 'uploading'; renderUploads();
@@ -1853,6 +1983,173 @@ async function handleUpload() {
   }
 }
 
+// 複数資料として1件にまとめて保存
+async function handleUploadMulti(targets, categoryId, memo) {
+  const id = uid('doc');
+  const now = new Date().toISOString();
+  const title = (document.getElementById('upTitle').value || '').trim() || (targets[0].title || '新しい資料');
+  const files = [];
+  for (const u of targets) {
+    u.status = 'uploading'; renderUploads();
+    try {
+      const path = `${DATA_DIR}/files/${id}/${safeFilename(u.file.name)}`;
+      const sha = await uploadFileToGitHub(path, u.file);
+      files.push({
+        fid: uid('f'), title: (u.title || '').trim() || u.file.name, originalName: u.file.name,
+        ext: u.ext, kind: u.kind, path, sha, size: u.file.size,
+        summary: u.analysis.summary, searchText: u.analysis.searchText, createdAt: new Date().toISOString()
+      });
+      u.status = 'done';
+    } catch (e) { u.status = 'error'; u.error = 'アップロード失敗: ' + e.message; }
+    renderUploads();
+  }
+  if (!files.length) { document.getElementById('upSaveBtn').disabled = false; return; }
+  const doc = { id, type: 'multi', title, categoryId, memo, user: '', orientation: '', cover: null, files,
+    createdAt: now, updatedAt: now, downloads: [], lastDownloadAt: null };
+  state.docs.push(doc);
+  showLoading('一覧データを保存中...');
+  try {
+    await saveData(`add package: ${title}`);
+    toast(`複数資料「${title}」を保存しました（${files.length}ファイル）`, 'success');
+    if (!uploads.some(u => u.status === 'error')) closeUpload();
+    renderAll();
+    openDetail(id);
+  } catch (e) {
+    toast('保存に失敗: ' + e.message, 'error');
+    state.docs = state.docs.filter(x => x !== doc);
+    for (const f of files) await deleteFileFromGitHub(f.path, f.sha);
+    renderAll();
+  } finally { hideLoading(); }
+}
+
+/* ==================== 複数資料のヘルパー ==================== */
+function isMulti(d) { return d.type === 'multi'; }
+function docFileList(d) { return isMulti(d) ? (d.files || []) : [{ fid: 'single', title: d.title, originalName: d.originalName, ext: d.ext, kind: d.kind, path: d.path, sha: d.sha, size: d.size }]; }
+function docTotalSize(d) { return isMulti(d) ? (d.files || []).reduce((a, f) => a + (f.size || 0), 0) : d.size; }
+const bufCache = new Map();   // path -> ArrayBuffer
+async function fileBuffer(f) {
+  if (bufCache.has(f.path)) return bufCache.get(f.path);
+  const buf = await fetchRepoFile(f.path);
+  bufCache.set(f.path, buf);
+  return buf;
+}
+// 表紙画像
+const coverCache = new Map(); // docId -> objectURL
+async function coverUrl(d) {
+  if (!d.cover) return null;
+  if (coverCache.has(d.id)) return coverCache.get(d.id);
+  const buf = await fetchRepoFile(d.cover.path);
+  const url = URL.createObjectURL(new Blob([buf], { type: d.cover.mime || 'image/png' }));
+  coverCache.set(d.id, url);
+  return url;
+}
+async function setCoverImage(d, file) {
+  if (!/^image\//.test(file.type)) { toast('画像ファイル（JPG / PNG など）を選んでください', 'error'); return; }
+  if (file.size > 10 * 1024 * 1024) { toast('表紙画像は10MBまでにしてください', 'error'); return; }
+  showLoading('表紙画像をアップロード中...');
+  const before = d.cover;
+  try {
+    const ext = (extOf(file.name) || 'png');
+    const path = `${DATA_DIR}/covers/${d.id}_${Date.now()}.${ext}`;
+    const sha = await uploadFileToGitHub(path, file);
+    d.cover = { path, sha, mime: file.type };
+    d.updatedAt = new Date().toISOString();
+    coverCache.delete(d.id);
+    await saveData(`cover: ${d.title}`);
+    if (before) await deleteFileFromGitHub(before.path, before.sha);
+    toast('表紙画像を登録しました', 'success');
+    renderAll(); if (detailId === d.id) { renderMultiTabs(d, 0); renderDetailSide(d); }
+  } catch (e) { d.cover = before; toast(e.message, 'error'); }
+  finally { hideLoading(); }
+}
+// 複数資料にファイルを追加
+async function addFilesToDoc(d, fileList) {
+  const list = [...fileList].filter(f => kindOf(f.name));
+  if (!list.length) { toast('Word / Excel のファイルを選んでください', 'error'); return; }
+  showLoading('ファイルを追加中...');
+  const added = [];
+  try {
+    for (const file of list) {
+      const analysis = await analyzeFile(file);
+      const path = `${DATA_DIR}/files/${d.id}/${safeFilename(file.name)}`;
+      const sha = await uploadFileToGitHub(path, file);
+      const f = { fid: uid('f'), title: file.name.replace(/\.[^.]+$/, ''), originalName: file.name, ext: extOf(file.name), kind: kindOf(file.name), path, sha, size: file.size, summary: analysis.summary, searchText: analysis.searchText, createdAt: new Date().toISOString() };
+      d.files.push(f); added.push(f);
+    }
+    d.updatedAt = new Date().toISOString();
+    await saveData(`add files: ${d.title}`);
+    toast(`${added.length}ファイルを追加しました`, 'success');
+    renderAll(); renderDetailSide(d); renderMultiTabs(d, 0);
+  } catch (e) {
+    d.files = d.files.filter(f => !added.includes(f));
+    for (const f of added) await deleteFileFromGitHub(f.path, f.sha);
+    toast(e.message, 'error');
+  } finally { hideLoading(); }
+}
+async function removeFileFromDoc(d, fid) {
+  const f = (d.files || []).find(x => x.fid === fid); if (!f) return;
+  if (!confirm(`「${f.title}」をこの資料から削除しますか？\nGitHub上のファイルも削除されます。`)) return;
+  const idx = d.files.indexOf(f);
+  d.files.splice(idx, 1);
+  showLoading('削除中...');
+  try {
+    await saveData(`remove file: ${f.originalName}`);
+    await deleteFileFromGitHub(f.path, f.sha);
+    toast('削除しました', 'success');
+    renderAll(); renderDetailSide(d); renderMultiTabs(d, 0);
+  } catch (e) { d.files.splice(idx, 0, f); toast(e.message, 'error'); }
+  finally { hideLoading(); }
+}
+async function renameMember(docId, fid, name) {
+  const d = state.docs.find(x => x.id === docId); if (!d) return;
+  const f = (d.files || []).find(x => x.fid === fid); if (!f) return;
+  const before = f.title;
+  f.title = (name || '').trim() || f.originalName;
+  d.updatedAt = new Date().toISOString();
+  try { await saveData(`rename file: ${f.title}`); toast('ファイル名を変えました', 'success'); }
+  catch (e) { f.title = before; toast(e.message, 'error'); renderDetailSide(d); }
+  renderMultiTabs(d, 0);
+}
+async function downloadMember(d, fid) {
+  const f = (d.files || []).find(x => x.fid === fid); if (!f) return;
+  showLoading('ダウンロード準備中...');
+  try {
+    const buf = await fileBuffer(f);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buf])); a.download = `${f.title}.${f.ext}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    const at = new Date().toISOString();
+    d.downloads = [...(d.downloads || []), { at, name: f.title }].slice(-DL_HISTORY_MAX);
+    d.lastDownloadAt = at;
+    try { await saveData(`download: ${f.originalName}`); } catch (e) {}
+    renderAll(); if (detailId === d.id) renderDetailSide(d);
+  } catch (e) { toast(e.message, 'error'); }
+  finally { hideLoading(); }
+}
+// 種類の切り替え
+async function changeDocType(id, type) {
+  const d = state.docs.find(x => x.id === id); if (!d) return;
+  if ((isMulti(d) ? 'multi' : 'single') === type) return;
+  if (type === 'multi') {
+    if (!confirm('この資料を「複数資料」に変えますか？\n今のファイルは1つ目のファイルとして残り、あとからファイルを追加できます。')) { renderDetailSide(d); return; }
+    d.files = [{ fid: uid('f'), title: d.title, originalName: d.originalName, ext: d.ext, kind: d.kind, path: d.path, sha: d.sha, size: d.size, summary: d.summary, searchText: d.searchText, preview: d.preview || null, createdAt: d.createdAt }];
+    d.type = 'multi'; d.cover = null;
+  } else {
+    const fs = d.files || [];
+    if (fs.length !== 1) { toast('単一資料に戻せるのは、ファイルが1つだけのときです', 'error'); renderDetailSide(d); return; }
+    const f = fs[0];
+    Object.assign(d, { type: 'single', originalName: f.originalName, ext: f.ext, kind: f.kind, path: f.path, sha: f.sha, size: f.size, summary: f.summary, searchText: f.searchText, preview: f.preview || null });
+    const oldCover = d.cover; d.cover = null; d.files = [];
+    if (oldCover) await deleteFileFromGitHub(oldCover.path, oldCover.sha).catch(() => {});
+  }
+  d.updatedAt = new Date().toISOString();
+  showLoading('保存中...');
+  try { await saveData(`type: ${d.title}`); toast('種類を変えました', 'success'); renderAll(); openDetail(d.id); }
+  catch (e) { toast(e.message, 'error'); }
+  finally { hideLoading(); }
+}
+
 /* ==================== 編集・削除 ==================== */
 async function handleDeleteDoc(id) {
   const d = state.docs.find(x => x.id === id); if (!d) return;
@@ -1861,9 +2158,14 @@ async function handleDeleteDoc(id) {
   const idx = state.docs.indexOf(d);
   state.docs.splice(idx, 1);
   try {
-    await saveData(`delete: ${d.originalName}`);
-    await deleteFileFromGitHub(d.path, d.sha);
-    if (d.preview) await deleteFileFromGitHub(d.preview.path, d.preview.sha);
+    await saveData(`delete: ${d.title}`);
+    if (isMulti(d)) {
+      for (const f of (d.files || [])) await deleteFileFromGitHub(f.path, f.sha);
+      if (d.cover) await deleteFileFromGitHub(d.cover.path, d.cover.sha);
+    } else {
+      await deleteFileFromGitHub(d.path, d.sha);
+      if (d.preview) await deleteFileFromGitHub(d.preview.path, d.preview.sha);
+    }
     closeModal('detailModal'); toast('削除しました', 'success');
   } catch (e) { state.docs.splice(idx, 0, d); toast(e.message, 'error'); }
   finally { hideLoading(); renderAll(); }
@@ -1967,7 +2269,16 @@ function userOptions(selected, withAll) {
     const files = e.dataTransfer.files;
     if (!files.length) return;
     if (document.getElementById('uploadModal').classList.contains('show')) addUploadFiles(files);
-    else if (document.getElementById('detailModal').classList.contains('show')) handleReplaceFile(files[0]);
+    else if (document.getElementById('detailModal').classList.contains('show')) {
+      const d = state.docs.find(x => x.id === detailId);
+      if (!d) return;
+      if (isMulti(d)) {
+        const imgs = [...files].filter(f => /^image\//.test(f.type));
+        if (imgs.length) setCoverImage(d, imgs[0]);
+        const docs = [...files].filter(f => kindOf(f.name));
+        if (docs.length) addFilesToDoc(d, docs);
+      } else handleReplaceFile(files[0]);
+    }
     else openUpload(files);
   });
   const dz = document.getElementById('dropzone');
