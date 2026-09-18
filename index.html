@@ -345,8 +345,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .xl-note { font-size: 12px; color: var(--text-light); margin-bottom: 10px; }
 .pv-image { margin-bottom: 18px; }
 .pv-image-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; }
-.pv-image-head .btn-icon { margin-left: auto; }
-.pv-image-head .btn-icon + .btn-icon { margin-left: 0; }
+.pv-image-head .btn-icon:first-of-type { margin-left: auto; }
 .pv-image img { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: zoom-in; display: block; background: #fff; }
 .pv-noimg { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-light); background: var(--bg); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 18px; }
 .card-thumb { height: 150px; overflow: hidden; border-top: 1px solid var(--border-light); border-bottom: 1px solid var(--border-light); background: #fff; margin-bottom: 10px; }
@@ -545,7 +544,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.3.0';
+const APP_VERSION = 'v2.4.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1562,6 +1561,21 @@ async function rebuildPreview(id, sheetName) {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoading(); }
 }
+async function removePreviewImage(docId) {
+  const d = state.docs.find(x => x.id === docId); if (!d || !d.preview || d.preview.self) return;
+  if (!confirm('プレビュー画像を削除しますか？\n（資料本体のファイルは消えません。「作り直す」でいつでも作れます）')) return;
+  const before = d.preview;
+  d.preview = null; d.updatedAt = new Date().toISOString();
+  imgCache.delete(d.id);
+  showLoading('削除中...');
+  try {
+    await saveData(`remove preview: ${d.title}`);
+    await deleteFileFromGitHub(before.path, before.sha);
+    toast('プレビュー画像を削除しました', 'success');
+    renderAll(); if (detailId === d.id) { renderDetailSide(d); renderExcelTabs(d, 0); }
+  } catch (e) { d.preview = before; toast(e.message, 'error'); }
+  finally { hideLoading(); }
+}
 async function openImageFull(id) {
   const d = state.docs.find(x => x.id === id); if (!d) return;
   const url = await previewImageUrl(d);
@@ -1661,7 +1675,9 @@ function renderMultiTabs(d, idx) {
       const url = d.cover ? await coverUrl(d).catch(() => null) : null;
       if (!box || detailId !== d.id) return;
       box.innerHTML = url
-        ? `<div class="pv-image-head">🖼️ 表紙<button class="btn-icon" onclick="document.getElementById('coverInput').click()">🔄 変更</button></div>
+        ? `<div class="pv-image-head">🖼️ 表紙
+             <button class="btn-icon" onclick="document.getElementById('coverInput').click()">🔄 変更</button>
+             <button class="btn-icon danger" onclick="removeCoverImage('${esc(d.id)}')">🗑️ 表紙を削除</button></div>
            <img src="${url}" alt="表紙">
            <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="if(this.files[0])setCoverImage(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files[0]); this.value=''">`
         : `<div class="replace-zone" style="padding:60px 20px" onclick="document.getElementById('coverInput').click()">
@@ -2018,6 +2034,7 @@ async function renderPreviewPane(d, body) {
       <div class="pv-image-head">🖼️ ${esc(label || '')} の中身${useSaved ? '' : '<span class="pv-tmp">未保存</span>'}
         <button class="btn-icon" onclick="openImageFull('${esc(d.id)}')">🔍 拡大</button>
         <button class="btn-icon" onclick="rebuildPreview('${esc(d.id)}', pendingSheet)">🔄 作り直す</button>
+        ${(useSaved && d.preview && !d.preview.self) ? `<button class="btn-icon danger" onclick="removePreviewImage('${esc(d.id)}')">🗑️ 画像を削除</button>` : ''}
       </div>
       <img src="${url}" alt="プレビュー" style="width:100%;max-width:${Math.round((w || 800) * 1.6)}px" onclick="${useSaved ? `openImageFull('${esc(d.id)}')` : `window.open('${url}','_blank')`}">`;
   } catch (e) {
@@ -2319,6 +2336,22 @@ async function setCoverImage(d, file) {
   } catch (e) { d.cover = before; toast(e.message, 'error'); }
   finally { hideLoading(); }
 }
+async function removeCoverImage(docId) {
+  const d = state.docs.find(x => x.id === docId); if (!d || !d.cover) return;
+  if (!confirm('表紙画像を削除しますか？\nGitHub上の画像も削除されます（中のファイルは消えません）。')) return;
+  const before = d.cover;
+  d.cover = null; d.updatedAt = new Date().toISOString();
+  coverCache.delete(d.id);
+  showLoading('削除中...');
+  try {
+    await saveData(`remove cover: ${d.title}`);
+    await deleteFileFromGitHub(before.path, before.sha);
+    toast('表紙画像を削除しました', 'success');
+    renderAll(); if (detailId === d.id) { renderDetailSide(d); renderMultiTabs(d, 0); }
+  } catch (e) { d.cover = before; toast(e.message, 'error'); }
+  finally { hideLoading(); }
+}
+
 // 複数資料にファイルを追加
 async function addFilesToDoc(d, fileList) {
   const list = [...fileList].filter(f => kindOf(f.name));
