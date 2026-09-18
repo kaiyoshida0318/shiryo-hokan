@@ -98,6 +98,8 @@ button { font-family: inherit; }
 }
 .tab-btn:hover { color: var(--text); }
 .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-add { border: none; background: transparent; color: var(--text-light); font-size: 18px; cursor: pointer; padding: 0 12px; }
+.tab-add:hover { color: var(--primary); }
 .tab-btn .cnt { font-size: 11px; opacity: 0.7; margin-left: 4px; font-family: ui-monospace, monospace; }
 
 /* ===== Toolbar ===== */
@@ -370,10 +372,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   </div>
 </header>
 
-<div class="tab-bar">
-  <button class="tab-btn active" data-tab="docs" onclick="switchTab('docs')">📚 資料一覧<span class="cnt" id="cntDocs">0</span></button>
-  <button class="tab-btn" data-tab="cats" onclick="switchTab('cats')">🏷️ カテゴリ<span class="cnt" id="cntCats">0</span></button>
-</div>
+<div class="tab-bar" id="tabBar"></div>
 
 <!-- 資料一覧 -->
 <section id="tab-docs">
@@ -387,7 +386,6 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
       <button data-kind="word" onclick="setKind('word')">📘 Word</button>
       <button data-kind="excel" onclick="setKind('excel')">📗 Excel</button>
     </div>
-    <select class="filter-select" id="catFilter" onchange="filterCat=this.value; renderDocs()"></select>
     <select class="filter-select" id="userFilter" onchange="filterUser=this.value; renderDocs()"></select>
     <select class="filter-select" id="sortSel" onchange="sortKey=this.value; renderDocs()">
       <option value="new">新しい順</option>
@@ -405,14 +403,6 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   <div class="content" id="docsContent"></div>
 </section>
 
-<!-- カテゴリ -->
-<section id="tab-cats" style="display:none">
-  <div class="toolbar">
-    <div class="toolbar-spacer"></div>
-    <button class="btn-add" onclick="openCatEdit(null)">＋ カテゴリ追加</button>
-  </div>
-  <div class="content" id="catsContent"></div>
-</section>
 
 <div class="drop-overlay" id="dropOverlay">📥 ここにドロップ（資料を開いているときは差し替え）</div>
 
@@ -490,14 +480,21 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   <div class="modal" style="max-width:520px">
     <div class="modal-header"><h2>🏷️ 項目設定</h2><button class="btn-close" onclick="closeModal('fieldModal')">×</button></div>
     <div class="modal-body">
-      <div class="side-title" style="margin-bottom:8px">メインの使用者（選べる名前）</div>
+      <div class="side-title" style="margin-bottom:8px">カテゴリ（上のタブに並びます）</div>
+      <div id="catList"></div>
+      <div class="inline-add" style="margin-top:10px">
+        <input type="text" id="newCat" placeholder="カテゴリを追加（例: パッケージ）" onkeydown="if(event.key==='Enter')addCatOption()">
+        <button type="button" onclick="addCatOption()">＋追加</button>
+      </div>
+      <span class="form-hint">ここで追加すると、画面上部に「資料一覧／パッケージ…」のようにタブが並びます。削除しても資料は消えず、未分類になります。</span>
+      <div class="side-title" style="margin:22px 0 8px">メインの使用者（選べる名前）</div>
       <div id="userList"></div>
       <div class="inline-add" style="margin-top:10px">
         <input type="text" id="newUser" placeholder="名前を追加（例: 佐藤）" onkeydown="if(event.key==='Enter')addUserOption()">
         <button type="button" onclick="addUserOption()">＋追加</button>
       </div>
       <span class="form-hint">ここで追加した名前が、資料ごとの「メインの使用者」で選べるようになります。</span>
-      <div class="side-title" style="margin:20px 0 8px">PDFの向き</div>
+      <div class="side-title" style="margin:22px 0 8px">PDFの向き</div>
       <div class="form-hint" style="margin:0">「縦」「横」から選べます（資料の情報として記録されます）。</div>
     </div>
     <div class="modal-actions">
@@ -507,26 +504,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   </div>
 </div>
 
-<!-- カテゴリ編集モーダル -->
-<div class="modal-backdrop" id="catModal">
-  <div class="modal" style="max-width:460px">
-    <div class="modal-header"><h2 id="catModalTitle">カテゴリ</h2><button class="btn-close" onclick="closeModal('catModal')">×</button></div>
-    <div class="modal-body">
-      <div class="form-row"><label>カテゴリ名</label><input type="text" id="catName" placeholder="例: 契約書"></div>
-      <div class="form-row"><label>説明（任意）</label><input type="text" id="catDesc"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-sub" onclick="closeModal('catModal')">キャンセル</button>
-      <button class="btn-add" onclick="handleSaveCat()">保存</button>
-    </div>
-  </div>
-</div>
-
 <div class="toast-wrap" id="toastWrap"></div>
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.10.0';
+const APP_VERSION = 'v1.11.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1202,10 +1184,19 @@ async function reloadFromGitHub() {
 /* ==================== 表示 ==================== */
 function switchTab(tab) {
   currentTab = tab;
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.getElementById('tab-docs').style.display = tab === 'docs' ? '' : 'none';
-  document.getElementById('tab-cats').style.display = tab === 'cats' ? '' : 'none';
+  filterCat = tab === 'docs' ? 'all' : (tab === 'none' ? 'none' : tab.replace('cat:', ''));
   renderAll();
+}
+function renderTabs() {
+  const cats = [...state.categories].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  const noneCount = state.docs.filter(d => !d.categoryId).length;
+  const tabs = [{ key: 'docs', label: '📚 資料一覧', cnt: state.docs.length }];
+  cats.forEach(c => tabs.push({ key: 'cat:' + c.id, label: c.name, cnt: state.docs.filter(d => d.categoryId === c.id).length }));
+  if (noneCount) tabs.push({ key: 'none', label: '未分類', cnt: noneCount });
+  if (!tabs.some(t => t.key === currentTab)) currentTab = 'docs';
+  document.getElementById('tabBar').innerHTML = tabs.map(t =>
+    `<button class="tab-btn${t.key === currentTab ? ' active' : ''}" onclick="switchTab('${esc(t.key)}')">${esc(t.label)}<span class="cnt">${t.cnt}</span></button>`).join('')
+    + `<button class="tab-add" onclick="openFieldSettings('cat')" title="カテゴリを追加・編集">＋</button>`;
 }
 function setKind(k) { filterKind = k; document.querySelectorAll('#kindSeg button').forEach(b => b.classList.toggle('active', b.dataset.kind === k)); renderDocs(); }
 function setView(v) {
@@ -1217,24 +1208,21 @@ let searchTimer = null;
 function onSearch(v) { clearTimeout(searchTimer); searchTimer = setTimeout(() => { searchText = v.trim(); renderDocs(); }, 150); }
 
 function renderAll() {
-  document.getElementById('cntDocs').textContent = state.docs.length;
-  document.getElementById('cntCats').textContent = state.categories.length;
-  renderCatFilter();
-  if (currentTab === 'docs') renderDocs(); else renderCats();
+  renderTabs();
+  renderUserFilter();
+  renderDocs();
+}
+function renderUserFilter() {
+  const uf = document.getElementById('userFilter');
+  if (!state.settings.users.includes(filterUser) && filterUser !== 'all' && filterUser !== 'none') filterUser = 'all';
+  uf.innerHTML = userOptions(filterUser, true);
+  uf.value = filterUser;
 }
 function catOptions(selected, withAll) {
   const cats = [...state.categories].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   let h = withAll ? `<option value="all">🏷️ すべてのカテゴリ</option><option value="none"${selected === 'none' ? ' selected' : ''}>（未分類）</option>` : `<option value="">（未分類）</option>`;
   h += cats.map(c => `<option value="${esc(c.id)}"${c.id === selected ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
   return h;
-}
-function renderCatFilter() {
-  if (filterCat !== 'all' && filterCat !== 'none' && !state.categories.some(c => c.id === filterCat)) filterCat = 'all';
-  document.getElementById('catFilter').innerHTML = catOptions(filterCat, true);
-  document.getElementById('catFilter').value = filterCat;
-  const uf = document.getElementById('userFilter');
-  uf.innerHTML = userOptions(filterUser, true);
-  uf.value = filterUser;
 }
 
 function matchDoc(d, words) {
@@ -1882,63 +1870,6 @@ async function handleDeleteDoc(id) {
 }
 
 /* ==================== カテゴリ ==================== */
-function renderCats() {
-  const el = document.getElementById('catsContent');
-  if (!auth.owner || !auth.repo) { el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚙️</div><div class="empty-title">先に⚙️設定を行ってください</div></div>`; return; }
-  if (!state.categories.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🏷️</div><div class="empty-title">カテゴリがありません</div><div class="empty-desc">「契約書」「見積書」「マニュアル」など、資料を分類するカテゴリを作れます。</div><button class="btn-add" onclick="openCatEdit(null)">＋ カテゴリ追加</button></div>`;
-    return;
-  }
-  const cats = [...state.categories].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-  el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>カテゴリ名</th><th>説明</th><th>資料数</th><th></th></tr></thead><tbody>${
-    cats.map(c => {
-      const n = state.docs.filter(d => d.categoryId === c.id).length;
-      return `<tr class="clickable" onclick="filterCat='${esc(c.id)}'; switchTab('docs')">
-        <td class="col-name"><span class="cat-chip">${esc(c.name)}</span></td>
-        <td class="muted">${esc(c.desc || '')}</td>
-        <td class="nowrap">${n} 件</td>
-        <td class="tbl-actions" onclick="event.stopPropagation()">
-          <button class="btn-icon" onclick="openCatEdit('${esc(c.id)}')">✏️</button>
-          <button class="btn-icon danger" onclick="handleDeleteCat('${esc(c.id)}')">🗑️</button>
-        </td></tr>`;
-    }).join('')
-  }</tbody></table></div>`;
-}
-function openCatEdit(id) {
-  editingCatId = id;
-  const c = state.categories.find(x => x.id === id) || {};
-  document.getElementById('catModalTitle').textContent = id ? '✏️ カテゴリ編集' : '＋ カテゴリ追加';
-  document.getElementById('catName').value = c.name || '';
-  document.getElementById('catDesc').value = c.desc || '';
-  showModal('catModal');
-  setTimeout(() => document.getElementById('catName').focus(), 50);
-}
-async function handleSaveCat() {
-  const name = document.getElementById('catName').value.trim();
-  const desc = document.getElementById('catDesc').value.trim();
-  if (!name) { toast('カテゴリ名を入力してください', 'error'); return; }
-  if (state.categories.some(c => c.name === name && c.id !== editingCatId)) { toast('同じ名前のカテゴリがあります', 'error'); return; }
-  const before = JSON.parse(JSON.stringify(state.categories));
-  if (editingCatId) Object.assign(state.categories.find(c => c.id === editingCatId), { name, desc });
-  else state.categories.push({ id: uid('cat'), name, desc });
-  showLoading('保存中...');
-  try { await saveData(`category: ${name}`); closeModal('catModal'); toast('保存しました', 'success'); }
-  catch (e) { state.categories = before; toast(e.message, 'error'); }
-  finally { hideLoading(); renderAll(); }
-}
-async function handleDeleteCat(id) {
-  const c = state.categories.find(x => x.id === id); if (!c) return;
-  const n = state.docs.filter(d => d.categoryId === id).length;
-  if (!confirm(`カテゴリ「${c.name}」を削除しますか？${n ? `\n${n}件の資料は「未分類」になります（資料は消えません）。` : ''}`)) return;
-  const beforeCats = JSON.parse(JSON.stringify(state.categories));
-  const affected = state.docs.filter(d => d.categoryId === id);
-  state.categories = state.categories.filter(x => x.id !== id);
-  affected.forEach(d => d.categoryId = '');
-  showLoading('削除中...');
-  try { await saveData(`delete category: ${c.name}`); toast('削除しました', 'success'); }
-  catch (e) { state.categories = beforeCats; affected.forEach(d => d.categoryId = id); toast(e.message, 'error'); }
-  finally { hideLoading(); renderAll(); }
-}
 async function quickAddCat(selectId) {
   const name = (prompt('新しいカテゴリ名') || '').trim();
   if (!name) return;
@@ -1952,16 +1883,32 @@ async function quickAddCat(selectId) {
     hideLoading();
   }
   document.getElementById(selectId).innerHTML = catOptions(c.id, false);
-  renderCatFilter();
-  document.getElementById('cntCats').textContent = state.categories.length;
+  renderTabs();
 }
 
 /* ==================== 項目設定（使用者リスト） ==================== */
-let userDraft = [];
-function openFieldSettings() {
+let userDraft = [], catDraft = [];
+function openFieldSettings(focus) {
   userDraft = [...(state.settings.users || DEFAULT_USERS)];
-  renderUserList();
+  catDraft = state.categories.map(c => ({ ...c }));
+  renderUserList(); renderCatList();
   showModal('fieldModal');
+  if (focus === 'cat') setTimeout(() => document.getElementById('newCat').focus(), 60);
+}
+function renderCatList() {
+  document.getElementById('catList').innerHTML = catDraft.length
+    ? catDraft.map((c, i) => `<div class="cat-manage-row"><input type="text" value="${esc(c.name)}" oninput="catDraft[${i}].name=this.value">
+        <span class="cat-manage-count">${state.docs.filter(d => d.categoryId === c.id).length} 件</span>
+        <button class="cat-manage-del" onclick="catDraft.splice(${i},1); renderCatList()">🗑️</button></div>`).join('')
+    : '<div class="cat-manage-empty">カテゴリがまだありません</div>';
+}
+function addCatOption() {
+  const el = document.getElementById('newCat');
+  const v = el.value.trim();
+  if (!v) return;
+  if (catDraft.some(c => c.name === v)) { toast('同じ名前のカテゴリがあります', 'error'); return; }
+  catDraft.push({ id: uid('cat'), name: v, desc: '' });
+  el.value = ''; renderCatList();
 }
 function renderUserList() {
   document.getElementById('userList').innerHTML = userDraft.length
@@ -1979,11 +1926,21 @@ function addUserOption() {
 }
 async function saveFieldSettings() {
   const users = [...new Set(userDraft.map(u => u.trim()).filter(Boolean))];
-  const before = state.settings.users;
+  const cats = catDraft.map(c => ({ ...c, name: c.name.trim() })).filter(c => c.name);
+  if (new Set(cats.map(c => c.name)).size !== cats.length) { toast('同じ名前のカテゴリがあります', 'error'); return; }
+  const beforeUsers = state.settings.users, beforeCats = state.categories;
+  const beforeDocCats = state.docs.map(d => d.categoryId || '');
+  const removed = state.categories.filter(c => !cats.some(x => x.id === c.id)).map(c => c.id);
   state.settings.users = users;
+  state.categories = cats;
+  if (removed.length) state.docs.forEach(d => { if (removed.includes(d.categoryId)) d.categoryId = ''; });
   showLoading('保存中...');
   try { await saveData('field settings'); closeModal('fieldModal'); toast('項目設定を保存しました', 'success'); }
-  catch (e) { state.settings.users = before; toast(e.message, 'error'); }
+  catch (e) {
+    state.settings.users = beforeUsers; state.categories = beforeCats;
+    state.docs.forEach((d, i) => d.categoryId = beforeDocCats[i]);
+    toast(e.message, 'error');
+  }
   finally { hideLoading(); renderAll(); }
 }
 function userOptions(selected, withAll) {
