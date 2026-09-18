@@ -294,6 +294,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .type-label { font-size: 13px; font-weight: 700; color: var(--primary-dark); background: var(--primary-light); border-radius: var(--radius-sm); padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
 .type-label .muted { font-size: 11px; font-weight: 400; }
 .cover-box { text-align: center; }
+.cover-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.cover-bar-label { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+.cover-bar-spacer { flex: 1; }
 .cover-box img { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
 .file-row { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
 .file-row .file-icon { width: 34px; height: 34px; font-size: 10px; }
@@ -546,7 +549,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.5.0';
+const APP_VERSION = 'v2.6.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1477,7 +1480,7 @@ function renderDocs() {
         <div class="file-icon ${multi ? 'pack' : d.kind}">${multi ? '📚' : extLabel(d.ext)}</div>
         <div class="card-titles"><div class="card-name">${highlight(d.title, searchText)}</div>${multi ? `<div class="card-file">${(d.files || []).length} ファイル</div>` : ''}</div>
       </div>
-      ${(multi ? d.cover : d.preview) ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
+      ${(multi ? coverSource(d) : d.preview) ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
       <div class="card-body">
         ${(d.categoryId || d.user || d.orientation) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : ''}${d.orientation ? `<span class="tag-chip">📄 ${esc(d.orientation)}</span>` : ''}</div>` : ''}
         ${snip ? `<div><div class="sum-label">一致した箇所</div><div class="snippet">${highlight(snip, searchText)}</div></div>` : summaryHtml(d, true)}
@@ -1673,20 +1676,28 @@ function renderMultiTabs(d, idx) {
     (async () => {
       const box = document.getElementById('coverBox');
       if (!box || detailId !== d.id) return;
-      const url = d.cover ? await coverUrl(d).catch(() => null) : null;
+      const src = coverSource(d);
+      const url = src ? await coverUrl(d).catch(() => null) : null;
       if (!box || detailId !== d.id) return;
-      box.innerHTML = url
-        ? `<div class="pv-image-head">🖼️ 表紙
-             <button class="btn-icon" onclick="document.getElementById('coverInput').click()">🔄 変更</button>
-             <button class="btn-icon danger" onclick="removeCoverImage('${esc(d.id)}')">🗑️ 表紙を削除</button></div>
-           <img src="${url}" alt="表紙">
-           <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="if(this.files[0])setCoverImage(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files[0]); this.value=''">`
+      const imgs = imageMembers(d);
+      const activeFid = src && src.kind === 'member' ? src.fid : null;
+      const chooser = `
+        <div class="cover-bar">
+          <span class="cover-bar-label">🖼️ 表紙</span>
+          ${imgs.map(f => `<button class="btn-cover ${activeFid === f.fid ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="${esc(f.title)}">${esc(f.title.slice(0, 14))}</button>`).join('')}
+          ${(src && src.kind === 'cover') ? `<button class="btn-cover on">アップした画像</button>` : ''}
+          <span class="cover-bar-spacer"></span>
+          ${url ? `<button class="btn-icon danger" onclick="removeCoverImage('${esc(d.id)}')">🗑️ 表紙を外す</button>` : ''}
+          <button class="btn-icon" onclick="document.getElementById('coverInput').click()">📤 表紙にする画像を登録</button>
+        </div>
+        <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="if(this.files[0])setCoverImage(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files[0]); this.value=''">`;
+      box.innerHTML = chooser + (url
+        ? `<img src="${url}" alt="表紙">`
         : `<div class="replace-zone" style="padding:60px 20px" onclick="document.getElementById('coverInput').click()">
              <div class="rz-icon">🖼️</div>
-             <div class="rz-title">表紙にする画像を登録</div>
-             <div class="rz-desc">クリックして選択／ここに画像をドラッグ＆ドロップ<br>一覧のサムネイルにも使われます</div>
-           </div>
-           <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="if(this.files[0])setCoverImage(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files[0]); this.value=''">`;
+             <div class="rz-title">表紙にする画像がありません</div>
+             <div class="rz-desc">クリックして選択／ここに画像をドラッグ＆ドロップ<br>中に画像ファイルを入れると、その画像も表紙に選べます</div>
+           </div>`);
     })();
     return;
   }
@@ -2284,13 +2295,46 @@ async function fileBuffer(f) {
 }
 // 表紙画像
 const coverCache = new Map(); // docId -> objectURL
+function imageMembers(d) { return (d.files || []).filter(f => f.kind === 'image'); }
+// 表紙にするもの: ①アップした表紙画像 ②選んだ中の画像 ③中の画像の1枚目
+function coverSource(d) {
+  if (d.cover) return { kind: 'cover', path: d.cover.path, mime: d.cover.mime || 'image/png' };
+  if (d.coverFid === 'none') return null;
+  const imgs = imageMembers(d);
+  if (!imgs.length) return null;
+  const picked = d.coverFid ? imgs.find(f => f.fid === d.coverFid) : null;
+  const f = picked || imgs[0];
+  return { kind: 'member', fid: f.fid, path: f.path, mime: `image/${f.ext === 'jpg' ? 'jpeg' : f.ext}`, title: f.title };
+}
 async function coverUrl(d) {
-  if (!d.cover) return null;
-  if (coverCache.has(d.id)) return coverCache.get(d.id);
-  const buf = await fetchRepoFile(d.cover.path);
-  const url = URL.createObjectURL(new Blob([buf], { type: d.cover.mime || 'image/png' }));
-  coverCache.set(d.id, url);
+  const src = coverSource(d);
+  if (!src) return null;
+  const key = d.id + '|' + src.path;
+  if (coverCache.has(key)) return coverCache.get(key);
+  const buf = await fetchRepoFile(src.path);
+  const url = URL.createObjectURL(new Blob([buf], { type: src.mime }));
+  coverCache.set(key, url);
   return url;
+}
+function clearCoverCache(d) { [...coverCache.keys()].filter(k => k.startsWith(d.id + '|')).forEach(k => coverCache.delete(k)); }
+// 中の画像を表紙に選ぶ
+async function pickCoverMember(docId, fid) {
+  const d = state.docs.find(x => x.id === docId); if (!d) return;
+  const before = { cover: d.cover, coverFid: d.coverFid };
+  if (d.cover) { const old = d.cover; d.cover = null; d.coverFid = fid; clearCoverCache(d);
+    showLoading('表紙を変更中...');
+    try { await saveData(`cover: ${d.title}`); await deleteFileFromGitHub(old.path, old.sha); }
+    catch (e) { Object.assign(d, before); toast(e.message, 'error'); hideLoading(); return; }
+    hideLoading();
+  } else {
+    d.coverFid = fid;
+    showLoading('保存中...');
+    try { await saveData(`cover: ${d.title}`); } catch (e) { Object.assign(d, before); toast(e.message, 'error'); }
+    finally { hideLoading(); }
+  }
+  clearCoverCache(d);
+  toast('表紙を変えました', 'success');
+  renderAll(); if (detailId === d.id) renderMultiTabs(d, 0);
 }
 async function setCoverImage(d, file) {
   if (!/^image\//.test(file.type)) { toast('画像ファイル（JPG / PNG など）を選んでください', 'error'); return; }
@@ -2302,8 +2346,9 @@ async function setCoverImage(d, file) {
     const path = `${DATA_DIR}/covers/${d.id}_${Date.now()}.${ext}`;
     const sha = await uploadFileToGitHub(path, file);
     d.cover = { path, sha, mime: file.type };
+    d.coverFid = '';
     d.updatedAt = new Date().toISOString();
-    coverCache.delete(d.id);
+    clearCoverCache(d);
     await saveData(`cover: ${d.title}`);
     if (before) await deleteFileFromGitHub(before.path, before.sha);
     toast('表紙画像を登録しました', 'success');
@@ -2312,11 +2357,21 @@ async function setCoverImage(d, file) {
   finally { hideLoading(); }
 }
 async function removeCoverImage(docId) {
-  const d = state.docs.find(x => x.id === docId); if (!d || !d.cover) return;
-  if (!confirm('表紙画像を削除しますか？\nGitHub上の画像も削除されます（中のファイルは消えません）。')) return;
+  const d = state.docs.find(x => x.id === docId); if (!d) return;
+  if (!d.cover) {   // 中の画像を表紙にしている場合は「使わない」に
+    if (!confirm('表紙の表示をやめますか？（画像ファイル自体は残ります）')) return;
+    d.coverFid = 'none'; d.updatedAt = new Date().toISOString();
+    clearCoverCache(d);
+    showLoading('保存中...');
+    try { await saveData(`cover off: ${d.title}`); toast('表紙をやめました', 'success'); renderAll(); if (detailId === d.id) { renderDetailSide(d); renderMultiTabs(d, 0); } }
+    catch (e) { d.coverFid = ''; toast(e.message, 'error'); }
+    finally { hideLoading(); }
+    return;
+  }
+  if (!confirm('アップした表紙画像を削除しますか？\nGitHub上の画像も削除されます（中のファイルは消えません）。')) return;
   const before = d.cover;
   d.cover = null; d.updatedAt = new Date().toISOString();
-  coverCache.delete(d.id);
+  clearCoverCache(d);
   showLoading('削除中...');
   try {
     await saveData(`remove cover: ${d.title}`);
