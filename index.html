@@ -255,13 +255,18 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .drop-overlay.show { display: flex; }
 
 /* ===== Detail ===== */
-.detail { display: grid; grid-template-columns: 280px 1fr; gap: 20px; height: 100%; min-height: 0; }
-.detail-side { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-.info-list { display: flex; flex-direction: column; gap: 10px; }
+.detail { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 18px; height: 100%; min-height: 0; }
+.detail-side { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding-right: 2px; }
+.side-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface); }
+.side-edit { background: var(--bg); }
+.side-title { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
+.side-edit .form-row:last-of-type { margin-bottom: 16px; }
+.pv-tmp { font-size: 10px; font-weight: 700; color: var(--warning-text); background: var(--warning-bg); padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+.info-list { display: flex; flex-direction: column; gap: 9px; }
 .info-list dt { font-size: 11px; font-weight: 700; color: var(--text-light); }
 .info-list dd { font-size: 13px; word-break: break-all; }
 .info-list dd.memo { white-space: pre-wrap; word-break: normal; }
-.side-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.side-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .detail-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .pv-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); background: var(--bg); padding: 0 8px; overflow-x: auto; flex-shrink: 0; }
 .pv-tab { padding: 9px 14px; border: none; background: transparent; font-size: 12px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
@@ -325,6 +330,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   .grid { grid-template-columns: 1fr; }
   .form-2col { grid-template-columns: 1fr; }
   .detail { grid-template-columns: 1fr; height: auto; }
+  .detail-side { overflow: visible; }
   .modal-lg { height: auto; }
   .detail-main { min-height: 60vh; }
   .btn-icon .lbl { display: none; }
@@ -456,37 +462,12 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <div class="modal-header"><h2 id="detailTitle"></h2><button class="btn-close" onclick="closeModal('detailModal')">×</button></div>
     <div class="modal-body" style="overflow:hidden;display:flex;flex-direction:column">
       <div class="detail">
-        <div class="detail-side" id="detailSide"></div>
         <div class="detail-main">
           <div class="pv-tabs" id="pvTabs"></div>
           <div class="pv-body" id="pvBody"></div>
         </div>
+        <div class="detail-side" id="detailSide"></div>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- 資料編集モーダル -->
-<div class="modal-backdrop" id="editModal">
-  <div class="modal">
-    <div class="modal-header"><h2>✏️ 資料情報の編集</h2><button class="btn-close" onclick="closeModal('editModal')">×</button></div>
-    <div class="modal-body">
-      <div class="form-row"><label>資料名</label><input type="text" id="edTitle"></div>
-      <div class="form-row" id="edSheetRow" style="display:none">
-        <label>大きく表示するシート（プレビュー画像）</label>
-        <select id="edSheet"></select>
-        <span class="form-hint">変更して保存すると、そのシートの見た目で画像を作り直します。</span>
-      </div>
-      <div class="form-row">
-        <label>カテゴリ</label>
-        <div class="inline-add"><select id="edCat"></select><button type="button" onclick="quickAddCat('edCat')">＋新規</button></div>
-      </div>
-      <div class="form-row"><label>タグ（カンマ区切り）</label><input type="text" id="edTags"></div>
-      <div class="form-row"><label>メモ</label><textarea id="edMemo"></textarea></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-sub" onclick="closeModal('editModal')">キャンセル</button>
-      <button class="btn-add" onclick="handleSaveEdit()">保存</button>
     </div>
   </div>
 </div>
@@ -510,7 +491,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.4.0';
+const APP_VERSION = 'v1.5.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -528,7 +509,7 @@ let state = { docs: [], categories: [], sha: null, _loadFailed: false, _wasEmpty
 let currentTab = 'docs';
 let filterKind = 'all', filterCat = 'all', searchText = '', sortKey = 'new', viewMode = 'card';
 let uploads = [];          // アップロード待ちファイル
-let editingId = null, editingCatId = null, detailId = null;
+let editingCatId = null, detailId = null, pendingSheet = '';
 
 /* ==================== GitHub helpers ==================== */
 async function ghFetch(path, opts = {}) {
@@ -1395,25 +1376,82 @@ async function openDetail(id) {
   const d = state.docs.find(x => x.id === id);
   if (!d) return;
   detailId = id;
+  pendingSheet = (d.preview && d.preview.sheet) || ((d.summary.excel || {}).mainSheet) || '';
   document.getElementById('detailTitle').textContent = `${d.kind === 'word' ? '📘' : '📗'} ${d.title}`;
-  const s = d.summary || {};
-  document.getElementById('detailSide').innerHTML = `
-    <div class="side-actions">
-      <button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button>
-      <button class="btn-icon" onclick="openEdit('${esc(d.id)}')">✏️ 編集</button>
-      <button class="btn-icon danger" onclick="handleDeleteDoc('${esc(d.id)}')">🗑️ 削除</button>
-    </div>
-    <dl class="info-list">
-      <div><dt>ファイル名</dt><dd>${esc(d.originalName)}</dd></div>
-      <div><dt>種類 / サイズ</dt><dd><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span> ${fmtSize(d.size)}</dd></div>
-      <div><dt>カテゴリ</dt><dd>${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : '<span class="muted">未分類</span>'}</dd></div>
-      <div><dt>タグ</dt><dd>${(d.tags || []).length ? `<div class="chip-row">${d.tags.map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : '<span class="muted">—</span>'}</dd></div>
-      <div><dt>ボリューム</dt><dd>${metaCounts(d)}${d.kind === 'word' && s.word && !s.word.unsupported ? `<br><span class="muted">段落 ${fmtNum(s.word.paragraphCount)} / 表 ${s.word.tableCount} / 画像 ${s.word.imageCount}</span>` : ''}</dd></div>
-      <div><dt>メモ</dt><dd class="memo">${d.memo ? esc(d.memo) : '<span class="muted">—</span>'}</dd></div>
-      <div><dt>登録日</dt><dd>${fmtDate(d.createdAt)}${d.updatedAt && d.updatedAt !== d.createdAt ? `<br><span class="muted">更新 ${fmtDate(d.updatedAt)}</span>` : ''}</dd></div>
-    </dl>`;
+  renderDetailSide(d);
   showModal('detailModal');
-  if (d.kind === 'word') renderWordTabs(d, 'summary'); else renderExcelTabs(d, 0);
+  if (d.kind === 'word') renderWordTabs(d, 0); else renderExcelTabs(d, 0);
+}
+
+function renderDetailSide(d) {
+  const s = d.summary || {};
+  const sheets = (s.excel && s.excel.sheets) || [];
+  document.getElementById('detailSide').innerHTML = `
+    <div class="side-block">
+      <div class="side-actions">
+        <button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button>
+        <button class="btn-icon danger" onclick="handleDeleteDoc('${esc(d.id)}')">🗑️ 削除</button>
+      </div>
+      <dl class="info-list">
+        <div><dt>ファイル名</dt><dd>${esc(d.originalName)}</dd></div>
+        <div><dt>種類 / サイズ</dt><dd><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span> ${fmtSize(d.size)}</dd></div>
+        <div><dt>ボリューム</dt><dd>${metaCounts(d)}${d.kind === 'word' && s.word && !s.word.unsupported ? `<br><span class="muted">段落 ${fmtNum(s.word.paragraphCount)} / 表 ${s.word.tableCount} / 画像 ${s.word.imageCount}</span>` : ''}</dd></div>
+        <div><dt>登録日</dt><dd>${fmtDate(d.createdAt)}${d.updatedAt && d.updatedAt !== d.createdAt ? ` <span class="muted">（更新 ${fmtDate(d.updatedAt)}）</span>` : ''}</dd></div>
+      </dl>
+    </div>
+    <div class="side-block side-edit">
+      <div class="side-title">✏️ 編集</div>
+      <div class="form-row"><label>資料名</label><input type="text" id="dsTitle" value="${esc(d.title)}"></div>
+      ${(d.kind === 'excel' && sheets.length > 1) ? `
+      <div class="form-row">
+        <label>大きく表示するシート</label>
+        <div class="inline-add">
+          <select id="dsSheet" onchange="onPickSheet(this.value)">${sheets.map(x => `<option value="${esc(x.name)}"${x.name === pendingSheet ? ' selected' : ''}>${esc(x.name)}（${fmtNum(x.rows)}行×${x.cols}列）</option>`).join('')}</select>
+        </div>
+        <span class="form-hint" id="dsSheetHint"></span>
+      </div>` : ''}
+      <div class="form-row">
+        <label>カテゴリ</label>
+        <div class="inline-add"><select id="dsCat">${catOptions(d.categoryId || '', false)}</select><button type="button" onclick="quickAddCat('dsCat')">＋新規</button></div>
+      </div>
+      <div class="form-row"><label>タグ（カンマ区切り）</label><input type="text" id="dsTags" value="${esc((d.tags || []).join(', '))}"></div>
+      <div class="form-row"><label>メモ</label><textarea id="dsMemo">${esc(d.memo || '')}</textarea></div>
+      <button class="btn-add" style="width:100%" onclick="handleDetailSave()">保存</button>
+    </div>`;
+  const sel = document.getElementById('dsCat'); if (sel) sel.value = d.categoryId || '';
+}
+
+// シート選択が変わったとき：その場で画像を作って左側に表示
+function onPickSheet(name) {
+  pendingSheet = name;
+  const d = state.docs.find(x => x.id === detailId); if (!d) return;
+  const saved = (d.preview && d.preview.sheet) || '';
+  const hint = document.getElementById('dsSheetHint');
+  if (hint) hint.textContent = name === saved ? '' : '「保存」を押すと、この見た目が一覧にも反映されます。';
+  renderExcelTabs(d, 0);
+}
+
+async function handleDetailSave() {
+  const d = state.docs.find(x => x.id === detailId); if (!d) return;
+  const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, tags: d.tags, memo: d.memo, updatedAt: d.updatedAt }));
+  d.title = document.getElementById('dsTitle').value.trim() || d.originalName;
+  d.categoryId = document.getElementById('dsCat').value || '';
+  d.tags = parseTags(document.getElementById('dsTags').value);
+  d.memo = document.getElementById('dsMemo').value.trim();
+  d.updatedAt = new Date().toISOString();
+  const savedSheet = (d.preview && d.preview.sheet) || '';
+  const sheetChanged = d.kind === 'excel' && pendingSheet && pendingSheet !== savedSheet;
+  showLoading(sheetChanged ? `「${pendingSheet}」の画像を作成中...` : '保存中...');
+  try {
+    if (sheetChanged) { await savePreviewFor(d, pendingSheet); showLoading('保存中...'); }
+    await saveData(`edit: ${d.originalName}`);
+    toast('保存しました', 'success');
+    document.getElementById('detailTitle').textContent = `${d.kind === 'word' ? '📘' : '📗'} ${d.title}`;
+    renderAll();
+    renderDetailSide(d);
+    if (sheetChanged) renderExcelTabs(d, 0);
+  } catch (e) { Object.assign(d, backup); toast(e.message, 'error'); renderDetailSide(d); }
+  finally { hideLoading(); }
 }
 async function getDocBuffer(d) {
   if (pvCache.id === d.id && pvCache.buf) return pvCache.buf;
@@ -1426,13 +1464,12 @@ function setPvTabs(items, active, handler) {
     `<button class="pv-tab${i === active ? ' active' : ''}" onclick="${handler}(${i})">${esc(t)}</button>`).join('');
 }
 
-function renderWordTabs(d, which) {
+function renderWordTabs(d, idx) {
   const w = (d.summary && d.summary.word) || {};
-  const idx = which === 'summary' ? 0 : 1;
-  window._wordTab = i => { if (detailId === d.id) renderWordTabs(d, i === 0 ? 'summary' : 'full'); };
-  setPvTabs(['📋 概要・目次', '📄 本文プレビュー'], idx, '_wordTab');
+  window._wordTab = i => { if (detailId === d.id) renderWordTabs(d, i); };
+  setPvTabs(['📄 本文プレビュー', '📋 目次・情報'], idx, '_wordTab');
   const body = document.getElementById('pvBody');
-  if (which === 'summary') {
+  if (idx === 1) {
     if (w.unsupported) { body.innerHTML = `<div class="pv-loading">旧形式(.doc)は中身の表示に対応していません。<br>ダウンロードしてWordで開くか、.docxで保存し直してアップしてください。</div>`; return; }
     body.innerHTML = `
       <div class="stat-row">
@@ -1443,18 +1480,16 @@ function renderWordTabs(d, which) {
         <div class="stat"><div class="v">${w.imageCount || 0}</div><div class="k">画像</div></div>
       </div>
       <div class="sum-label" style="margin-bottom:6px">${w.headingsGuessed ? '主な項目（太字の短い段落から推定）' : '目次（見出し）'}</div>
-      ${(w.headings || []).length ? `<ul class="toc">${w.headings.map(h => `<li class="l${h.level}">${esc(h.text)}</li>`).join('')}</ul>` : '<div class="muted">見出しスタイルが使われていない文書です</div>'}
-      <div class="sum-label" style="margin:18px 0 6px">冒頭の文章</div>
-      <div class="sum-excerpt" style="-webkit-line-clamp:unset">${esc(w.excerpt || '')}</div>`;
+      ${(w.headings || []).length ? `<ul class="toc">${w.headings.map(h => `<li class="l${h.level}">${esc(h.text)}</li>`).join('')}</ul>` : '<div class="muted">見出しスタイルが使われていない文書です</div>'}`;
     return;
   }
+  if (w.unsupported) { body.innerHTML = `<div class="pv-loading">旧形式(.doc)は中身の表示に対応していません。</div>`; return; }
   body.innerHTML = '<div class="pv-loading">⏳ GitHubからファイルを読み込み中...</div>';
   (async () => {
     try {
       const buf = await getDocBuffer(d);
       const res = await mammoth.convertToHtml({ arrayBuffer: buf.slice(0) });
       if (detailId !== d.id) return;
-      // 念のため script/イベント属性を除去
       const dom = new DOMParser().parseFromString(res.value, 'text/html');
       dom.querySelectorAll('script,iframe,object,embed').forEach(n => n.remove());
       dom.querySelectorAll('*').forEach(n => [...n.attributes].forEach(a => { if (/^on/i.test(a.name) || (a.name === 'href' && /^\s*javascript:/i.test(a.value))) n.removeAttribute(a.name); }));
@@ -1468,27 +1503,9 @@ function renderWordTabs(d, which) {
 function renderExcelTabs(d, sheetIdx) {
   const sheets = (d.summary && d.summary.excel && d.summary.excel.sheets) || [];
   window._xlTab = i => { if (detailId === d.id) renderExcelTabs(d, i); };
-  setPvTabs(['📋 概要', ...sheets.map(s => `${s.hidden ? '🙈 ' : ''}${s.name}`)], sheetIdx, '_xlTab');
+  setPvTabs(['🖼️ プレビュー', ...sheets.map(s => `${s.hidden ? '🙈 ' : ''}${s.name}`)], sheetIdx, '_xlTab');
   const body = document.getElementById('pvBody');
-  if (sheetIdx === 0) {
-    body.innerHTML = `
-      ${d.preview ? `<div class="pv-image" id="pvImage"><div class="pv-loading">⏳ プレビュー画像を読み込み中...</div></div>` : `<div class="pv-noimg">この資料にはプレビュー画像がありません<button class="btn-icon" onclick="rebuildPreview('${esc(d.id)}')">🖼️ 今すぐ作る</button></div>`}
-      <div class="stat-row">
-        <div class="stat"><div class="v">${sheets.length}</div><div class="k">シート</div></div>
-        <div class="stat"><div class="v">${fmtNum(sheets.reduce((a, s) => a + s.rows, 0))}</div><div class="k">行（合計）</div></div>
-      </div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>シート名</th><th>行×列</th><th>項目（見出し行）</th></tr></thead><tbody>
-      ${sheets.map((s, i) => `<tr class="clickable" onclick="_xlTab(${i + 1})"><td class="col-name" style="min-width:120px">${s.hidden ? '🙈 ' : ''}${esc(s.name)}</td><td class="nowrap">${fmtNum(s.rows)}×${s.cols}</td><td class="col-sum">${s.header.filter(Boolean).map(esc).join(' ／ ') || '<span class="muted">空のシート</span>'}</td></tr>`).join('')}
-      </tbody></table></div>`;
-    if (d.preview) {
-      previewImageUrl(d).then(url => {
-        const box = document.getElementById('pvImage');
-        if (!box || detailId !== d.id || !url) return;
-        box.innerHTML = `<div class="pv-image-head">🖼️ ${esc(d.preview.sheet || '')} の中身<button class="btn-icon" onclick="openImageFull('${esc(d.id)}')">🔍 別タブで拡大</button><button class="btn-icon" onclick="rebuildPreview('${esc(d.id)}')">🔄 作り直す</button>${(((d.summary.excel || {}).sheets || []).length > 1) ? `<button class="btn-icon" onclick="openEdit('${esc(d.id)}')">🔀 シートを変える</button>` : ''}</div><img src="${url}" alt="プレビュー" style="width:100%;max-width:${Math.round((d.preview.w || 800) * 1.6)}px" onclick="openImageFull('${esc(d.id)}')">`;
-      }).catch(e => { const box = document.getElementById('pvImage'); if (box) box.innerHTML = `<div class="pv-loading">⚠️ 画像を読み込めませんでした</div>`; });
-    }
-    return;
-  }
+  if (sheetIdx === 0) { renderPreviewPane(d, body); return; }
   body.innerHTML = '<div class="pv-loading">⏳ GitHubからファイルを読み込み中...</div>';
   (async () => {
     try {
@@ -1502,15 +1519,47 @@ function renderExcelTabs(d, sheetIdx) {
       let cols = 0; rows.forEach(r => { for (let i = r.length - 1; i >= 0; i--) if (cellStr(r[i]) !== '') { cols = Math.max(cols, i + 1); break; } });
       cols = Math.min(cols, 60);
       const shown = rows.slice(0, PREVIEW_ROW_MAX);
-      const colName = i => XLSX.utils.encode_col(i);
       body.innerHTML = `
         ${rows.length > PREVIEW_ROW_MAX || cols === 60 ? `<div class="xl-note">※ 先頭${PREVIEW_ROW_MAX}行・60列までを表示しています（全${fmtNum(rows.length)}行）</div>` : ''}
-        <table class="xl-table"><thead><tr><th></th>${Array.from({ length: cols }, (_, i) => `<th>${colName(i)}</th>`).join('')}</tr></thead>
+        <table class="xl-table"><thead><tr><th></th>${Array.from({ length: cols }, (_, i) => `<th>${XLSX.utils.encode_col(i)}</th>`).join('')}</tr></thead>
         <tbody>${shown.map((r, ri) => `<tr><td class="rn">${ri + 1}</td>${Array.from({ length: cols }, (_, i) => { const v = cellStr(r[i]); return `<td title="${esc(v)}">${esc(v)}</td>`; }).join('')}</tr>`).join('')}</tbody></table>`;
     } catch (e) {
       body.innerHTML = `<div class="pv-loading">⚠️ ${esc(e.message)}</div>`;
     }
   })();
+}
+
+// 左側のプレビュー画像ペイン（保存済み画像 or 選択中シートの仮画像）
+let tmpImgUrl = null;
+async function renderPreviewPane(d, body) {
+  const savedSheet = (d.preview && d.preview.sheet) || '';
+  const useSaved = d.preview && (!pendingSheet || pendingSheet === savedSheet);
+  body.innerHTML = `<div class="pv-image" id="pvImage"><div class="pv-loading">⏳ プレビュー画像を準備中...</div></div>`;
+  const box = document.getElementById('pvImage');
+  try {
+    let url, w, label;
+    if (useSaved) {
+      url = await previewImageUrl(d); w = d.preview.w; label = savedSheet;
+    } else {
+      const buf = await getDocBuffer(d);
+      const a = analyzeWorkbook(buf.slice(0), d.ext);
+      const img = await makePreviewImage(buf.slice(0), d.ext, a, pendingSheet);
+      if (!img) throw new Error('画像にできる表が見つかりませんでした');
+      if (tmpImgUrl) URL.revokeObjectURL(tmpImgUrl);
+      tmpImgUrl = URL.createObjectURL(img.blob);
+      url = tmpImgUrl; w = img.w; label = img.sheet || pendingSheet;
+    }
+    if (!box || detailId !== d.id) return;
+    if (!url) throw new Error('画像がありません');
+    box.innerHTML = `
+      <div class="pv-image-head">🖼️ ${esc(label || '')} の中身${useSaved ? '' : '<span class="pv-tmp">未保存</span>'}
+        <button class="btn-icon" onclick="openImageFull('${esc(d.id)}')">🔍 拡大</button>
+        <button class="btn-icon" onclick="rebuildPreview('${esc(d.id)}', pendingSheet)">🔄 作り直す</button>
+      </div>
+      <img src="${url}" alt="プレビュー" style="width:100%;max-width:${Math.round((w || 800) * 1.6)}px" onclick="${useSaved ? `openImageFull('${esc(d.id)}')` : `window.open('${url}','_blank')`}">`;
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="pv-noimg">プレビュー画像がありません（${esc(e.message)}）<button class="btn-icon" onclick="rebuildPreview('${esc(d.id)}', pendingSheet)">🖼️ 今すぐ作る</button></div>`;
+  }
 }
 
 async function downloadDoc(id) {
@@ -1636,48 +1685,6 @@ async function handleUpload() {
 }
 
 /* ==================== 編集・削除 ==================== */
-function openEdit(id) {
-  const d = state.docs.find(x => x.id === id); if (!d) return;
-  editingId = id;
-  document.getElementById('edTitle').value = d.title || '';
-  document.getElementById('edCat').innerHTML = catOptions(d.categoryId || '', false);
-  document.getElementById('edTags').value = (d.tags || []).join(', ');
-  document.getElementById('edMemo').value = d.memo || '';
-  const row = document.getElementById('edSheetRow'), sel = document.getElementById('edSheet');
-  const sheets = (d.summary && d.summary.excel && d.summary.excel.sheets) || [];
-  if (d.kind === 'excel' && sheets.length) {
-    const cur = (d.preview && d.preview.sheet) || (d.summary.excel.mainSheet || sheets[0].name);
-    sel.innerHTML = sheets.map(x => `<option value="${esc(x.name)}"${x.name === cur ? ' selected' : ''}>${esc(x.name)}（${fmtNum(x.rows)}行×${x.cols}列）${x.hidden ? ' ※非表示シート' : ''}</option>`).join('');
-    sel.value = cur;
-    row.style.display = sheets.length > 1 ? '' : 'none';
-  } else row.style.display = 'none';
-  showModal('editModal');
-}
-async function handleSaveEdit() {
-  const d = state.docs.find(x => x.id === editingId); if (!d) return;
-  const backup = { ...d };
-  d.title = document.getElementById('edTitle').value.trim() || d.originalName;
-  d.categoryId = document.getElementById('edCat').value || '';
-  d.tags = parseTags(document.getElementById('edTags').value);
-  d.memo = document.getElementById('edMemo').value.trim();
-  d.updatedAt = new Date().toISOString();
-  const row = document.getElementById('edSheetRow');
-  const newSheet = row.style.display === 'none' ? null : document.getElementById('edSheet').value;
-  const curSheet = (d.preview && d.preview.sheet) || (d.summary.excel && d.summary.excel.mainSheet);
-  showLoading('保存中...');
-  try {
-    if (newSheet && newSheet !== curSheet) {
-      showLoading(`「${newSheet}」の画像を作成中...`);
-      await savePreviewFor(d, newSheet);
-      showLoading('保存中...');
-    }
-    await saveData(`edit: ${d.originalName}`);
-    closeModal('editModal'); toast('保存しました', 'success');
-    renderAll();
-    if (detailId === d.id && document.getElementById('detailModal').classList.contains('show')) openDetail(d.id);
-  } catch (e) { Object.assign(d, backup); toast(e.message, 'error'); }
-  finally { hideLoading(); }
-}
 async function handleDeleteDoc(id) {
   const d = state.docs.find(x => x.id === id); if (!d) return;
   if (!confirm(`「${d.title}」を削除しますか？\nGitHub上のファイルも削除されます。`)) return;
@@ -1791,7 +1798,7 @@ async function quickAddCat(selectId) {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  for (const id of ['catModal', 'editModal', 'settingsModal', 'uploadModal', 'detailModal']) {
+  for (const id of ['catModal', 'settingsModal', 'uploadModal', 'detailModal']) {
     const m = document.getElementById(id);
     if (m.classList.contains('show')) { id === 'uploadModal' ? closeUpload() : closeModal(id); break; }
   }
