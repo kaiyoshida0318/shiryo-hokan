@@ -124,6 +124,8 @@ button { font-family: inherit; }
 .seg button.active { background: var(--primary); color: #fff; font-weight: 500; }
 .seg button.active[data-kind="word"] { background: var(--word); }
 .seg button.active[data-kind="excel"] { background: var(--excel); }
+.seg button.active[data-kind="pdf"] { background: var(--fail); }
+.seg button.active[data-kind="image"] { background: #7c3aed; }
 .filter-select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 13px; color: var(--text); max-width: 200px; cursor: pointer; font-family: inherit; }
 .toolbar-spacer { flex: 1; }
 .result-count { font-size: 12px; color: var(--text-light); white-space: nowrap; }
@@ -157,6 +159,11 @@ button { font-family: inherit; }
 .file-icon.word { background: var(--word-bg); color: var(--word-text); }
 .file-icon.excel { background: var(--excel-bg); color: var(--excel-text); }
 .file-icon.pack { background: var(--primary-light); color: var(--primary-dark); font-size: 20px; }
+.file-icon.pdf, .kind-badge.pdf { background: var(--fail-bg); color: var(--fail-text); }
+.file-icon.image, .kind-badge.image { background: #ede9fe; color: #5b21b6; }
+.card.pdf .card-head { border-top-color: var(--fail); }
+.card.image .card-head { border-top-color: #7c3aed; }
+.pv-image img[alt="画像"] { max-width: 100%; width: auto; }
 .card.multi .card-head { border-top-color: var(--primary); }
 .card-titles { min-width: 0; flex: 1; }
 .card-name { font-size: 15px; font-weight: 700; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -403,6 +410,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
       <button class="active" data-kind="all" onclick="setKind('all')">すべて</button>
       <button data-kind="word" onclick="setKind('word')">📘 Word</button>
       <button data-kind="excel" onclick="setKind('excel')">📗 Excel</button>
+      <button data-kind="pdf" onclick="setKind('pdf')">📕 PDF</button>
+      <button data-kind="image" onclick="setKind('image')">🖼️ 画像</button>
     </div>
     <select class="filter-select" id="userFilter" onchange="filterUser=this.value; renderDocs()"></select>
     <select class="filter-select" id="sortSel" onchange="sortKey=this.value; renderDocs()">
@@ -461,9 +470,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
       <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
         <div class="dz-icon">📄</div>
         <div class="dz-title">クリックしてファイルを選択／ここにドラッグ＆ドロップ</div>
-        <div class="dz-desc">Word（.docx / .doc）・Excel（.xlsx / .xls / .xlsm / .csv）　複数まとめてOK<br><span id="dzHint"></span></div>
+        <div class="dz-desc">Word・Excel・PDF・画像（JPG / PNG など）に対応　複数まとめてOK<br><span id="dzHint"></span></div>
       </div>
-      <input type="file" id="fileInput" multiple accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="addUploadFiles(this.files); this.value=''">
+      <input type="file" id="fileInput" multiple accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp" style="display:none" onchange="addUploadFiles(this.files); this.value=''">
       <div class="up-list" id="upList"></div>
       <div class="form-row">
         <label>カテゴリ（まとめて設定）</label>
@@ -531,7 +540,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.1.0';
+const APP_VERSION = 'v2.2.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -546,7 +555,16 @@ const DL_HISTORY_MAX = 30;       // 残すダウンロード履歴の件数
 const DEFAULT_USERS = ['吉田', '高橋', '遠藤'];
 const ORIENTATIONS = ['縦', '横'];
 
-const KIND_BY_EXT = { docx: 'word', doc: 'word', xlsx: 'excel', xls: 'excel', xlsm: 'excel', csv: 'excel' };
+const KIND_BY_EXT = {
+  docx: 'word', doc: 'word',
+  xlsx: 'excel', xls: 'excel', xlsm: 'excel', csv: 'excel',
+  pdf: 'pdf',
+  jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', bmp: 'image', heic: 'image'
+};
+const ACCEPT_EXT = '.docx,.doc,.xlsx,.xls,.xlsm,.csv,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp';
+const PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+const PDFJS_WORKER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+const PDF_TEXT_PAGES = 30;   // 検索用に文字を読むページ数
 
 let auth = { pat: '', owner: '', repo: '', branch: 'main' };
 let state = { docs: [], categories: [], settings: { users: [...DEFAULT_USERS] }, sha: null, _loadFailed: false, _wasEmpty: false };
@@ -677,11 +695,25 @@ function kindOf(name) { return KIND_BY_EXT[extOf(name)] || null; }
 
 async function analyzeFile(file) {
   const ext = extOf(file.name);
+  const kind = kindOf(file.name);
+  if (kind === 'image') return analyzeImage(file);
   const buf = await file.arrayBuffer();
+  if (ext === 'pdf') return analyzePdf(buf);
   if (ext === 'docx') return analyzeDocx(buf);
   if (ext === 'doc') return { summary: { word: { unsupported: true } }, searchText: '' };
   if (['xlsx', 'xls', 'xlsm', 'csv'].includes(ext)) return analyzeWorkbook(buf, ext);
   throw new Error('未対応の形式です');
+}
+async function analyzeImage(file) {
+  const url = URL.createObjectURL(file);
+  const size = await new Promise(res => {
+    const im = new Image();
+    im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight });
+    im.onerror = () => res({ w: 0, h: 0 });
+    im.src = url;
+  });
+  URL.revokeObjectURL(url);
+  return { summary: { image: { w: size.w, h: size.h, orientation: size.w > size.h ? '横' : '縦' } }, searchText: '', useSelfAsPreview: true };
 }
 
 async function analyzeDocx(buf) {
@@ -774,6 +806,62 @@ function analyzeWorkbook(buf, ext) {
     searchText: texts.join('\n').slice(0, SEARCH_TEXT_MAX),
     previewSource: main ? { name: main.name, ...allRows[main.name] } : null
   };
+}
+
+/* ---- pdf.js を必要なときだけ読み込む ---- */
+let pdfjsPromise = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER; return Promise.resolve(window.pdfjsLib); }
+  if (!pdfjsPromise) {
+    pdfjsPromise = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = PDFJS_URL;
+      sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER; resolve(window.pdfjsLib); };
+      sc.onerror = () => { pdfjsPromise = null; reject(new Error('PDFライブラリの読み込みに失敗しました')); };
+      document.head.appendChild(sc);
+    });
+  }
+  return pdfjsPromise;
+}
+
+/* ---- PDFの解析（文字＋1ページ目の画像） ---- */
+async function analyzePdf(buf) {
+  const pdfjsLib = await loadPdfJs();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+  const pages = pdf.numPages;
+  let text = '';
+  for (let i = 1; i <= Math.min(pages, PDF_TEXT_PAGES) && text.length < SEARCH_TEXT_MAX; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    text += tc.items.map(it => it.str).join(' ') + '\n';
+  }
+  const p1 = await pdf.getPage(1);
+  const vp0 = p1.getViewport({ scale: 1 });
+  const landscape = vp0.width > vp0.height;
+  const img = await renderPdfPage(pdf, 1);
+  return {
+    summary: { pdf: { pages, excerpt: text.replace(/\s+/g, ' ').trim().slice(0, 240), charCount: text.replace(/\s/g, '').length, orientation: landscape ? '横' : '縦' } },
+    searchText: text.slice(0, SEARCH_TEXT_MAX),
+    previewImage: img
+  };
+}
+async function renderPdfPage(pdf, num) {
+  const page = await pdf.getPage(num);
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(2.2, 1600 / base.width);
+  const vp = page.getViewport({ scale });
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  return new Promise(res => cv.toBlob(b => res(b ? { blob: b, w: Math.round(vp.width / 2), h: Math.round(vp.height / 2) } : null), 'image/png'));
+}
+async function pdfPageImageUrl(buf, num) {
+  const pdfjsLib = await loadPdfJs();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+  const img = await renderPdfPage(pdf, Math.min(Math.max(num, 1), pdf.numPages));
+  return { url: URL.createObjectURL(img.blob), pages: pdf.numPages, w: img.w };
 }
 
 /* ---- ExcelJS を必要なときだけ読み込む ---- */
@@ -992,6 +1080,9 @@ async function renderStyledSheetImage(buf, sheetName) {
 
 /* ---- プレビュー画像の作成（まず書式ありで、ダメなら簡易描画） ---- */
 async function makePreviewImage(buf, ext, analysis, sheetName) {
+  if (analysis && analysis.previewImage) return analysis.previewImage;     // PDF
+  if (ext === 'pdf') { const a = await analyzePdf(buf); return a.previewImage; }
+  if (kindOf('x.' + ext) === 'image') return null;                          // 画像は元ファイルをそのまま使う
   const target = sheetName || ((analysis.summary || {}).excel || {}).mainSheet;
   if (ext === 'xlsx' || ext === 'xlsm') {
     try {
@@ -1001,7 +1092,7 @@ async function makePreviewImage(buf, ext, analysis, sheetName) {
   }
   const src = (sheetName && analysis.previewSource && analysis.previewSource.name !== sheetName)
     ? sheetSource(buf.slice(0), ext, sheetName) : analysis.previewSource;
-  return renderSheetImage(src);
+  return src ? renderSheetImage(src) : null;
 }
 // 指定シートを簡易描画用のデータにする
 function sheetSource(buf, ext, sheetName) {
@@ -1157,6 +1248,10 @@ function fmtDate(s) {
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+function kindIcon(d) {
+  if (isMulti(d)) return '📚';
+  return { word: '📘', excel: '📗', pdf: '📕', image: '🖼️' }[d.kind] || '📄';
+}
 function fmtDateTime(s) {
   if (!s) return '—';
   const d = new Date(s); if (isNaN(d)) return s;
@@ -1283,6 +1378,12 @@ function filteredDocs() {
 }
 
 function summaryHtml(d, compact) {
+  if (d.kind === 'image') return '';
+  if (d.kind === 'pdf') {
+    const p = (d.summary || {}).pdf || {};
+    if (compact) return '';
+    return p.excerpt ? `<div><div class="sum-label">冒頭</div><div class="sum-excerpt">${esc(p.excerpt)}</div></div>` : '';
+  }
   if (isMulti(d)) {
     const fs = d.files || [];
     if (compact) return '';
@@ -1316,6 +1417,8 @@ function summaryHtml(d, compact) {
 function metaCounts(d) {
   if (isMulti(d)) return `${(d.files || []).length}ファイル`;
   const s = d.summary || {};
+  if (d.kind === 'pdf') return `${fmtNum((s.pdf || {}).pages || 0)}ページ`;
+  if (d.kind === 'image') return (s.image && s.image.w) ? `${s.image.w}×${s.image.h}px` : '画像';
   if (d.kind === 'word') { const w = s.word || {}; return w.unsupported ? '—' : `${fmtNum(w.charCount)}字`; }
   const sh = (s.excel && s.excel.sheets) || [];
   return `${sh.length}シート / ${fmtNum(sh.reduce((a, x) => a + x.rows, 0))}行`;
@@ -1376,6 +1479,8 @@ function renderDocs() {
   setupThumbs();
 }
 function listSummary(d) {
+  if (d.kind === 'pdf') { const p = (d.summary || {}).pdf || {}; return esc((p.excerpt || '').slice(0, 120)) || '<span class="muted">—</span>'; }
+  if (d.kind === 'image') return '<span class="muted">—</span>';
   if (isMulti(d)) { const fs = d.files || []; return fs.slice(0, 6).map(f => esc(f.title)).join(' ／ ') + (fs.length > 6 ? ` ほか${fs.length - 6}件` : ''); }
   const s = d.summary || {};
   if (d.kind === 'word') {
@@ -1393,7 +1498,8 @@ async function previewImageUrl(d) {
   if (!d.preview) return null;
   if (imgCache.has(d.id)) return imgCache.get(d.id);
   const buf = await fetchRepoFile(d.preview.path);
-  const url = URL.createObjectURL(new Blob([buf], { type: 'image/png' }));
+  const mime = d.preview.self ? (d.mime || `image/${d.ext === 'jpg' ? 'jpeg' : d.ext}`) : 'image/png';
+  const url = URL.createObjectURL(new Blob([buf], { type: mime }));
   imgCache.set(d.id, url);
   return url;
 }
@@ -1460,19 +1566,83 @@ async function openDetail(id) {
   if (!d) return;
   detailId = id;
   pendingSheet = (d.preview && d.preview.sheet) || (((d.summary || {}).excel || {}).mainSheet) || '';
-  document.getElementById('detailTitle').textContent = `${isMulti(d) ? '📚' : (d.kind === 'word' ? '📘' : '📗')} ${d.title}`;
+  document.getElementById('detailTitle').textContent = `${kindIcon(d)} ${d.title}`;
   renderDetailSide(d);
   showModal('detailModal');
   if (isMulti(d)) renderMultiTabs(d, 0);
   else if (d.kind === 'word') renderWordTabs(d, 0);
+  else if (d.kind === 'pdf') renderPdfTabs(d, 0);
+  else if (d.kind === 'image') renderImageTab(d);
   else renderExcelTabs(d, 0);
+}
+
+/* ---- PDFの左ペイン ---- */
+function renderPdfTabs(d, idx) {
+  const p = (d.summary || {}).pdf || {};
+  window._pdfTab = i => { if (detailId === d.id) renderPdfTabs(d, i); };
+  setPvTabs(['🖼️ ページを見る', '📄 テキスト'], idx, '_pdfTab');
+  const body = document.getElementById('pvBody');
+  if (idx === 1) {
+    body.innerHTML = `<div class="stat-row">
+        <div class="stat"><div class="v">${fmtNum(p.pages || 0)}</div><div class="k">ページ</div></div>
+        <div class="stat"><div class="v">${fmtNum(p.charCount || 0)}</div><div class="k">文字</div></div>
+        <div class="stat"><div class="v">${esc(p.orientation || '—')}</div><div class="k">向き</div></div>
+      </div>
+      <div class="doc-preview" style="white-space:pre-wrap">${esc(d.searchText || '（文字が入っていないPDFのようです。スキャン画像のPDFは文字を読み取れません）')}</div>`;
+    return;
+  }
+  body.innerHTML = '<div class="pv-loading">⏳ 読み込み中...</div>';
+  (async () => {
+    try {
+      const buf = await getDocBuffer(d);
+      if (detailId !== d.id) return;
+      pdfPage = 1;
+      await showPdfPage(d, buf, 1);
+    } catch (e) { body.innerHTML = `<div class="pv-loading">⚠️ ${esc(e.message)}</div>`; }
+  })();
+}
+let pdfPage = 1, pdfBufCache = null;
+async function showPdfPage(d, buf, num) {
+  const body = document.getElementById('pvBody');
+  body.innerHTML = '<div class="pv-loading">⏳ ページを表示中...</div>';
+  const r = await pdfPageImageUrl(buf, num);
+  if (!body || detailId !== d.id) return;
+  pdfPage = Math.min(Math.max(num, 1), r.pages);
+  pdfBufCache = buf;
+  body.innerHTML = `<div class="pv-image">
+      <div class="pv-image-head">📄 ${pdfPage} / ${r.pages} ページ
+        <button class="btn-icon" onclick="pdfNav(-1)" ${pdfPage <= 1 ? 'disabled' : ''}>◀ 前</button>
+        <button class="btn-icon" onclick="pdfNav(1)" ${pdfPage >= r.pages ? 'disabled' : ''}>次 ▶</button>
+        <button class="btn-icon" onclick="window.open('${r.url}','_blank')">🔍 拡大</button>
+      </div>
+      <img src="${r.url}" alt="PDFページ" style="width:100%;max-width:${Math.round((r.w || 800) * 1.6)}px" onclick="window.open('${r.url}','_blank')"></div>`;
+}
+function pdfNav(delta) {
+  const d = state.docs.find(x => x.id === detailId);
+  if (d && pdfBufCache) showPdfPage(d, pdfBufCache, pdfPage + delta);
+}
+
+/* ---- 画像の左ペイン ---- */
+function renderImageTab(d) {
+  const im = (d.summary || {}).image || {};
+  setPvTabs(['🖼️ 画像'], 0, '_noop');
+  window._noop = () => {};
+  const body = document.getElementById('pvBody');
+  body.innerHTML = '<div class="pv-loading">⏳ 読み込み中...</div>';
+  previewImageUrl(d).then(url => {
+    if (detailId !== d.id) return;
+    body.innerHTML = url
+      ? `<div class="pv-image"><div class="pv-image-head">🖼️ ${im.w ? `${im.w} × ${im.h} px` : ''}<button class="btn-icon" onclick="openImageFull('${esc(d.id)}')">🔍 拡大</button></div>
+         <img src="${url}" alt="画像" onclick="openImageFull('${esc(d.id)}')"></div>`
+      : '<div class="pv-loading">画像を読み込めませんでした</div>';
+  }).catch(e => { body.innerHTML = `<div class="pv-loading">⚠️ ${esc(e.message)}</div>`; });
 }
 
 /* ---- 複数資料の左ペイン（表紙＋各ファイル） ---- */
 function renderMultiTabs(d, idx) {
   const files = d.files || [];
   window._mTab = i => { if (detailId === d.id) renderMultiTabs(d, i); };
-  setPvTabs(['🖼️ 表紙', ...files.map(f => `${f.kind === 'word' ? '📘' : '📗'} ${f.title}`)], idx, '_mTab');
+  setPvTabs(['🖼️ 表紙', ...files.map(f => `${kindIcon(f)} ${f.title}`)], idx, '_mTab');
   const body = document.getElementById('pvBody');
   if (idx === 0) {
     body.innerHTML = `<div class="cover-box" id="coverBox"><div class="pv-loading">⏳ 読み込み中...</div></div>`;
@@ -1501,7 +1671,15 @@ function renderMultiTabs(d, idx) {
     try {
       const buf = await fileBuffer(f);
       if (detailId !== d.id) return;
-      if (f.kind === 'word') {
+      if (f.kind === 'image') {
+        const url = URL.createObjectURL(new Blob([buf], { type: `image/${f.ext === 'jpg' ? 'jpeg' : f.ext}` }));
+        body.innerHTML = `<div class="pv-image"><img src="${url}" alt="${esc(f.title)}" onclick="window.open('${url}','_blank')"></div>`;
+      } else if (f.kind === 'pdf') {
+        const r = await pdfPageImageUrl(buf, 1);
+        if (detailId !== d.id) return;
+        body.innerHTML = `<div class="pv-image"><div class="pv-image-head">📄 1 / ${r.pages} ページ<button class="btn-icon" onclick="window.open('${r.url}','_blank')">🔍 拡大</button></div>
+          <img src="${r.url}" alt="PDF" style="width:100%;max-width:${Math.round((r.w || 800) * 1.6)}px" onclick="window.open('${r.url}','_blank')"></div>`;
+      } else if (f.kind === 'word') {
         const res = await mammoth.convertToHtml({ arrayBuffer: buf.slice(0) });
         const dom = new DOMParser().parseFromString(res.value, 'text/html');
         dom.querySelectorAll('script,iframe,object,embed').forEach(n => n.remove());
@@ -1556,7 +1734,7 @@ function renderDetailSide(d) {
         <div class="rz-title">新しいファイルをドラッグ＆ドロップ</div>
         <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・メモ・履歴はそのまま引き継ぎます</div>
       </div>
-      <input type="file" id="replaceInput" accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
+      <input type="file" id="replaceInput" accept="${ACCEPT_EXT}" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
       ${(d.updates || []).length ? `<div class="dl-history" style="max-height:120px">${d.updates.slice().reverse().map(x => `<div class="dl-row">${fmtDateTime(x.at)} ${esc(x.name || '')}</div>`).join('')}</div>` : ''}
     </div>`}
     </div>
@@ -1607,7 +1785,7 @@ function renderDetailSide(d) {
         <div class="rz-title">ファイルを追加</div>
         <div class="rz-desc">クリックして選択／ここにドラッグ＆ドロップ（何枚でもOK）</div>
       </div>
-      <input type="file" id="replaceInput" multiple accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files.length)addFilesToDoc(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files); this.value=''">
+      <input type="file" id="replaceInput" multiple accept="${ACCEPT_EXT}" style="display:none" onchange="if(this.files.length)addFilesToDoc(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files); this.value=''">
     </div>` : ''}
     `;
   const sel = document.getElementById('dsCat'); if (sel) sel.value = d.categoryId || '';
@@ -1628,7 +1806,7 @@ function onPickSheet(name) {
 async function handleReplaceFile(file) {
   const d = state.docs.find(x => x.id === detailId); if (!d) return;
   const kind = kindOf(file.name);
-  if (!kind) { toast('Word / Excel のファイルを選んでください', 'error'); return; }
+  if (!kind) { toast('Word / Excel / PDF / 画像 のファイルを選んでください', 'error'); return; }
   if (file.size > MAX_FILE_MB * 1024 * 1024) { toast(`${MAX_FILE_MB}MBを超えるファイルはアップできません`, 'error'); return; }
   if (!confirm(`「${d.title}」のファイルを\n「${file.name}」に差し替えますか？\n\n前のファイルは置き換えられます（資料名・カテゴリ・メモ・ダウンロード履歴はそのまま残ります）。`)) return;
   const backup = JSON.parse(JSON.stringify({ path: d.path, sha: d.sha, size: d.size, ext: d.ext, kind: d.kind, originalName: d.originalName, summary: d.summary, searchText: d.searchText, preview: d.preview, updatedAt: d.updatedAt, updates: d.updates || [] }));
@@ -1651,7 +1829,10 @@ async function handleReplaceFile(file) {
     d.updates = [...(d.updates || []), { at: d.updatedAt, name: file.name }].slice(-DL_HISTORY_MAX);
     pvCache = { id: null, buf: null }; imgCache.delete(d.id);
     // プレビュー画像を作り直す
-    if (analysis.previewSource) {
+    if (analysis.useSelfAsPreview) {
+      if (d.preview && !d.preview.self) await deleteFileFromGitHub(d.preview.path, d.preview.sha);
+      d.preview = { path: newPath, sha: newSha, w: (analysis.summary.image || {}).w || 0, h: (analysis.summary.image || {}).h || 0, self: true };
+    } else if (analysis.previewSource || analysis.previewImage) {
       showLoading('プレビュー画像を作成中...');
       try {
         const img = await makePreviewImage(await file.arrayBuffer(), d.ext, analysis);
@@ -1693,6 +1874,7 @@ async function renameStoredFile(d) {
   if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || 'ファイル名の変更に失敗しました'); }
   const oldPath = d.path, oldSha = d.sha;
   d.path = newPath; d.sha = (await res.json()).content.sha; d.originalName = newName;
+  if (d.preview && d.preview.self) { d.preview = { ...d.preview, path: d.path, sha: d.sha }; imgCache.delete(d.id); }
   await deleteFileFromGitHub(oldPath, oldSha);
 }
 
@@ -1719,7 +1901,7 @@ async function handleDetailSave(closeAfter) {
     toast(wantRename ? `保存しました（ファイル名：${d.originalName}）` : '保存しました', 'success');
     renderAll();
     if (closeAfter) { closeModal('detailModal'); detailId = null; return; }
-    document.getElementById('detailTitle').textContent = `${isMulti(d) ? '📚' : (d.kind === 'word' ? '📘' : '📗')} ${d.title}`;
+    document.getElementById('detailTitle').textContent = `${kindIcon(d)} ${d.title}`;
     renderDetailSide(d);
     if (sheetChanged) renderExcelTabs(d, 0);
   } catch (e) { Object.assign(d, backup); toast(e.message, 'error'); renderDetailSide(d); }
@@ -1886,7 +2068,7 @@ function addUploadFiles(fileList) {
   for (const f of fileList) {
     const kind = kindOf(f.name);
     const item = { key: uid('up'), file: f, kind, ext: extOf(f.name), title: f.name.replace(/\.[^.]+$/, ''), status: 'analyzing', error: '', analysis: null };
-    if (!kind) { item.status = 'error'; item.error = '未対応の形式です（Word / Excel のみ）'; }
+    if (!kind) { item.status = 'error'; item.error = '未対応の形式です（Word / Excel / PDF / 画像）'; }
     else if (f.size > MAX_FILE_MB * 1024 * 1024) { item.status = 'error'; item.error = `${MAX_FILE_MB}MBを超えるファイルはアップできません`; }
     uploads.push(item);
     if (item.status === 'analyzing') {
@@ -1903,6 +2085,8 @@ function upSubText(u) {
   if (u.status === 'done') return `<div class="up-sub" style="color:var(--excel)">✅ 保存しました</div>`;
   const s = u.analysis.summary;
   let t = '';
+  if (s.pdf) t = `${fmtNum(s.pdf.pages)}ページ・${fmtNum(s.pdf.charCount)}字（${s.pdf.orientation}）　${esc((s.pdf.excerpt || '').slice(0, 50))}`;
+  if (s.image) t = `画像 ${s.image.w}×${s.image.h}px（${s.image.orientation}）`;
   if (s.word) t = s.word.unsupported ? '旧形式(.doc)：ファイルのみ保管（中身の抽出なし）' : `${fmtNum(s.word.charCount)}字・見出し${(s.word.headings || []).length}件・表${s.word.tableCount}件　${esc((s.word.excerpt || '').slice(0, 60))}`;
   if (s.excel) t = s.excel.sheets.map(x => `${esc(x.name)}(${fmtNum(x.rows)}行)`).join('・');
   const dup = state.docs.find(d => d.originalName === u.file.name);
@@ -1943,13 +2127,15 @@ async function handleUpload() {
       const path = `${DATA_DIR}/files/${id}/${safeFilename(u.file.name)}`;
       const sha = await uploadFileToGitHub(path, u.file);
       let preview = null;
-      if (u.analysis.previewSource) {
+      if (u.analysis.useSelfAsPreview) {
+        preview = { path, sha, w: (u.analysis.summary.image || {}).w || 0, h: (u.analysis.summary.image || {}).h || 0, self: true };
+      } else if (u.analysis.previewSource || u.analysis.previewImage) {
         try {
           const img = await makePreviewImage(await u.file.arrayBuffer(), u.ext, u.analysis);
           if (img) {
             const ipath = `${DATA_DIR}/previews/${id}.png`;
             const isha = await uploadFileToGitHub(ipath, new File([img.blob], `${id}.png`, { type: 'image/png' }));
-            preview = { path: ipath, sha: isha, w: img.w, h: img.h, sheet: img.sheet || u.analysis.previewSource.name };
+            preview = { path: ipath, sha: isha, w: img.w, h: img.h, sheet: img.sheet || (u.analysis.previewSource || {}).name || '' };
           }
         } catch (e) { console.warn('プレビュー画像の作成に失敗', e); }
       }
@@ -1957,6 +2143,7 @@ async function handleUpload() {
       const doc = {
         id, title: (u.title || '').trim() || u.file.name, originalName: u.file.name, ext: u.ext, kind: u.kind,
         path, sha, size: u.file.size, mime: u.file.type || '', categoryId, memo, preview,
+        orientation: ((u.analysis.summary.pdf || u.analysis.summary.image || {}).orientation) || '',
         createdAt: now, updatedAt: now, summary: u.analysis.summary, searchText: u.analysis.searchText
       };
       state.docs.push(doc); added.push(doc);
@@ -1975,7 +2162,7 @@ async function handleUpload() {
     } catch (e) {
       toast('一覧データの保存に失敗: ' + e.message, 'error');
       state.docs = state.docs.filter(d => !added.includes(d));
-      for (const d of added) { await deleteFileFromGitHub(d.path, d.sha); if (d.preview) await deleteFileFromGitHub(d.preview.path, d.preview.sha); }
+      for (const d of added) { await deleteFileFromGitHub(d.path, d.sha); if (d.preview && !d.preview.self) await deleteFileFromGitHub(d.preview.path, d.preview.sha); }
     } finally { hideLoading(); renderAll(); }
   }
 }
@@ -2062,7 +2249,7 @@ async function setCoverImage(d, file) {
 // 複数資料にファイルを追加
 async function addFilesToDoc(d, fileList) {
   const list = [...fileList].filter(f => kindOf(f.name));
-  if (!list.length) { toast('Word / Excel のファイルを選んでください', 'error'); return; }
+  if (!list.length) { toast('Word / Excel / PDF / 画像 のファイルを選んでください', 'error'); return; }
   showLoading('ファイルを追加中...');
   const added = [];
   try {
@@ -2139,7 +2326,7 @@ async function handleDeleteDoc(id) {
       if (d.cover) await deleteFileFromGitHub(d.cover.path, d.cover.sha);
     } else {
       await deleteFileFromGitHub(d.path, d.sha);
-      if (d.preview) await deleteFileFromGitHub(d.preview.path, d.preview.sha);
+      if (d.preview && !d.preview.self) await deleteFileFromGitHub(d.preview.path, d.preview.sha);
     }
     closeModal('detailModal'); toast('削除しました', 'success');
   } catch (e) { state.docs.splice(idx, 0, d); toast(e.message, 'error'); }
@@ -2247,12 +2434,8 @@ function userOptions(selected, withAll) {
     else if (document.getElementById('detailModal').classList.contains('show')) {
       const d = state.docs.find(x => x.id === detailId);
       if (!d) return;
-      if (isMulti(d)) {
-        const imgs = [...files].filter(f => /^image\//.test(f.type));
-        if (imgs.length) setCoverImage(d, imgs[0]);
-        const docs = [...files].filter(f => kindOf(f.name));
-        if (docs.length) addFilesToDoc(d, docs);
-      } else handleReplaceFile(files[0]);
+      if (isMulti(d)) addFilesToDoc(d, files);
+      else handleReplaceFile(files[0]);
     }
     else openUpload(files);
   });
