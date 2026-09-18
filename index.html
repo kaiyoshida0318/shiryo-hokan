@@ -219,6 +219,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .modal-lg { max-width: 1760px; width: 97vw; height: 94vh; }
 .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .modal-header h2 { font-size: 18px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.detail-actions .btn-add, .detail-actions .btn-sub { padding: 8px 16px; font-size: 13px; }
+.modal-header h2 { flex-shrink: 1; }
 .btn-close { background: transparent; border: none; font-size: 24px; color: var(--text-muted); cursor: pointer; width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .btn-close:hover { background: var(--bg); color: var(--text); }
 .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
@@ -383,6 +386,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   .form-2col { grid-template-columns: 1fr; }
   .detail { grid-template-columns: 1fr; height: auto; }
   .detail-side { overflow: visible; }
+  .detail-actions { width: 100%; order: 3; }
   .side-top { grid-template-columns: 1fr; }
   .modal-lg { height: auto; }
   .detail-main { min-height: 60vh; }
@@ -503,7 +507,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <!-- 詳細モーダル -->
 <div class="modal-backdrop" id="detailModal">
   <div class="modal modal-lg">
-    <div class="modal-header"><h2 id="detailTitle"></h2><button class="btn-close" onclick="closeModal('detailModal')">×</button></div>
+    <div class="modal-header">
+      <h2 id="detailTitle"></h2>
+      <div class="detail-actions" id="detailActions"></div>
+      <button class="btn-close" onclick="closeModal('detailModal')">×</button>
+    </div>
     <div class="modal-body" style="overflow:hidden;display:flex;flex-direction:column">
       <div class="detail">
         <div class="detail-main">
@@ -549,7 +557,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.6.0';
+const APP_VERSION = 'v2.7.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1288,7 +1296,10 @@ function toast(msg, type = '') {
 function showLoading(text) { document.getElementById('loadingText').textContent = text || '処理中...'; document.getElementById('loading').classList.add('show'); }
 function hideLoading() { document.getElementById('loading').classList.remove('show'); }
 function showModal(id) { document.getElementById(id).classList.add('show'); }
-function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+  if (id === 'detailModal') { detailId = null; const a = document.getElementById('detailActions'); if (a) a.innerHTML = ''; }
+}
 function extLabel(ext) { return (ext || '').toUpperCase().slice(0, 4); }
 function highlight(text, q) {
   const t = esc(text);
@@ -1739,15 +1750,17 @@ function renderDetailSide(d) {
   const s = d.summary || {};
   const sheets = (s.excel && s.excel.sheets) || [];
   const multi = isMulti(d);
+  document.getElementById('detailActions').innerHTML = `
+    <button class="btn-icon danger" onclick="handleDeleteDoc('${esc(d.id)}')">🗑️ 削除</button>
+    <button class="btn-sub" onclick="closeModal('detailModal')">キャンセル</button>
+    <button class="btn-add" onclick="handleDetailSave(false)">保存</button>
+    <button class="btn-add" onclick="handleDetailSave(true)">保存して閉じる</button>`;
   document.getElementById('detailSide').innerHTML = `
     <div class="type-label">${multi ? '📚 複数資料' : '📄 単一資料'}<span class="muted">（種類は登録時に決まります）</span></div>
     <div class="side-top">
     <div class="side-col">
     <div class="side-block">
-      <div class="side-actions">
-        ${multi ? '' : `<button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button>`}
-        <button class="btn-icon danger" onclick="handleDeleteDoc('${esc(d.id)}')">🗑️ 削除</button>
-      </div>
+      ${multi ? '' : `<div class="side-actions"><button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button></div>`}
       <dl class="info-list">
         ${multi
           ? `<div><dt>ファイル数</dt><dd>${(d.files || []).length} ファイル（合計 ${fmtSize(docTotalSize(d))}）</dd></div>`
@@ -1800,10 +1813,6 @@ function renderDetailSide(d) {
         <div class="inline-add"><select id="dsCat">${catOptions(d.categoryId || '', false)}</select><button type="button" onclick="quickAddCat('dsCat')">＋新規</button></div>
       </div>
       <div class="form-row"><label>メモ</label><textarea id="dsMemo">${esc(d.memo || '')}</textarea></div>
-      <div class="save-row">
-        <button class="btn-add" onclick="handleDetailSave(false)">保存</button>
-        <button class="btn-add" onclick="handleDetailSave(true)">保存して閉じる</button>
-      </div>
     </div>
     </div>
     ${multi ? `<div class="side-block">
