@@ -513,7 +513,6 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
           <button type="button" onclick="quickAddCat('upCat')">＋新規</button>
         </div>
       </div>
-      <div class="form-row"><label>メモ</label><textarea id="upMemo" placeholder="資料の補足など（任意）"></textarea></div>
     </div>
     <div class="modal-actions">
       <span class="result-count" id="upSummary" style="margin-right:auto;align-self:center"></span>
@@ -562,8 +561,6 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
         <button type="button" onclick="addUserOption()">＋追加</button>
       </div>
       <span class="form-hint">ここで追加した名前が、資料ごとの「メインの使用者」で選べるようになります。</span>
-      <div class="side-title" style="margin:22px 0 8px">PDFの向き</div>
-      <div class="form-hint" style="margin:0">「縦」「横」から選べます（資料の情報として記録されます）。</div>
     </div>
     <div class="modal-actions">
       <button class="btn-sub" onclick="closeModal('fieldModal')">閉じる</button>
@@ -576,7 +573,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.16.0';
+const APP_VERSION = 'v2.17.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1550,7 +1547,7 @@ function renderDocs() {
     return;
   }
   if (viewMode === 'list') {
-    el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>種類</th><th>資料名</th><th>カテゴリ</th><th>使用者</th><th>向き</th><th>中身の概要</th><th>最終DL</th><th>登録日</th></tr></thead><tbody>${
+    el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>種類</th><th>資料名</th><th>カテゴリ</th><th>使用者</th><th>中身の概要</th><th>最終DL</th><th>登録日</th></tr></thead><tbody>${
       list.map(d => {
         const snip = words.length ? snippetOf(d, words) : '';
         return `<tr class="clickable" onclick="openDetail('${esc(d.id)}')">
@@ -1560,7 +1557,6 @@ function renderDocs() {
           <td class="col-name">${highlight(d.title, searchText)}</td>
           <td class="nowrap">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : '<span class="muted">—</span>'}</td>
           <td class="nowrap">${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : '<span class="muted">—</span>'}</td>
-          <td class="nowrap">${d.orientation ? esc(d.orientation) : '<span class="muted">—</span>'}</td>
           <td class="col-sum">${snip ? `<div class="snippet">${highlight(snip, searchText)}</div>` : listSummary(d)}</td>
           <td class="nowrap muted">${d.lastDownloadAt ? `${fmtDate(d.lastDownloadAt)}<br><span class="muted">${(d.downloads || []).length}回</span>` : '—'}</td>
           <td class="nowrap muted">${fmtDate(d.createdAt)}</td>
@@ -1580,7 +1576,7 @@ function renderDocs() {
       </div>
       ${(multi ? coverSource(d) : d.preview) ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
       <div class="card-body">
-        ${(d.categoryId || d.user || d.orientation) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : ''}${d.orientation ? `<span class="tag-chip">📄 ${esc(d.orientation)}</span>` : ''}</div>` : ''}
+        ${(d.categoryId || d.user) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : ''}</div>` : ''}
         ${snip ? `<div><div class="sum-label">一致した箇所</div><div class="snippet">${highlight(snip, searchText)}</div></div>` : summaryHtml(d, true)}
       </div>
       <div class="card-meta"><span>${metaCounts(d)} · ${fmtSize(docTotalSize(d))}</span><span>${fmtDate(d.createdAt)}</span></div>
@@ -1887,6 +1883,28 @@ function renderDetailSide(d) {
   document.getElementById('detailSide').innerHTML = `
     <div class="type-label">${multi ? '📚 複数資料' : '📄 単一資料'}<span class="muted">（種類は登録時に決まります）</span></div>
     <div class="side-top">
+    <div class="side-block side-edit">
+      <div class="side-title">✏️ 編集</div>
+      <div class="form-row">
+        <label>資料名</label>
+        <input type="text" id="dsTitle" value="${esc(d.title)}">
+        ${multi ? '' : `<label class="chk"><input type="checkbox" id="dsRename" ${renameWithTitle ? 'checked' : ''}> 保存するファイル名も資料名に合わせる</label>
+        <span class="form-hint">現在のファイル名：${esc(d.originalName)}</span>`}
+      </div>
+      <div class="form-row"><label>メインの使用者</label><select id="dsUser">${userOptions(d.user || '', false)}</select></div>
+      ${(!multi && d.kind === 'excel' && sheets.length > 1) ? `
+      <div class="form-row">
+        <label>大きく表示するシート</label>
+        <div class="inline-add">
+          <select id="dsSheet" onchange="onPickSheet(this.value)">${sheets.map(x => `<option value="${esc(x.name)}"${x.name === pendingSheet ? ' selected' : ''}>${esc(x.name)}（${fmtNum(x.rows)}行×${x.cols}列）</option>`).join('')}</select>
+        </div>
+        <span class="form-hint" id="dsSheetHint"></span>
+      </div>` : ''}
+      <div class="form-row">
+        <label>カテゴリ</label>
+        <div class="inline-add"><select id="dsCat">${catOptions(d.categoryId || '', false)}</select><button type="button" onclick="quickAddCat('dsCat')">＋新規</button></div>
+      </div>
+    </div>
     <div class="side-col">
     <div class="side-block">
       ${multi ? '' : `<div class="side-actions"><button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button></div>`}
@@ -1911,37 +1929,11 @@ function renderDetailSide(d) {
       <div class="replace-zone" id="replaceZone" onclick="document.getElementById('replaceInput').click()">
         <div class="rz-icon">📥</div>
         <div class="rz-title">新しいファイルをドラッグ＆ドロップ</div>
-        <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・メモ・履歴はそのまま引き継ぎます</div>
+        <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・履歴はそのまま引き継ぎます</div>
       </div>
       <input type="file" id="replaceInput" accept="${ACCEPT_EXT}" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
       ${(d.updates || []).length ? `<div class="dl-history" style="max-height:120px">${d.updates.slice().reverse().map(x => `<div class="dl-row">${fmtDateTime(x.at)} ${esc(x.name || '')}</div>`).join('')}</div>` : ''}
     </div>`}
-    </div>
-    <div class="side-block side-edit">
-      <div class="side-title">✏️ 編集</div>
-      <div class="form-row">
-        <label>資料名</label>
-        <input type="text" id="dsTitle" value="${esc(d.title)}">
-        ${multi ? '' : `<label class="chk"><input type="checkbox" id="dsRename" ${renameWithTitle ? 'checked' : ''}> 保存するファイル名も資料名に合わせる</label>
-        <span class="form-hint">現在のファイル名：${esc(d.originalName)}</span>`}
-      </div>
-      <div class="form-2col">
-        <div class="form-row"><label>メインの使用者</label><select id="dsUser">${userOptions(d.user || '', false)}</select></div>
-        <div class="form-row"><label>PDFの向き</label><select id="dsOri"><option value="">（未設定）</option>${ORIENTATIONS.map(o => `<option value="${o}"${d.orientation === o ? ' selected' : ''}>${o}</option>`).join('')}</select></div>
-      </div>
-      ${(!multi && d.kind === 'excel' && sheets.length > 1) ? `
-      <div class="form-row">
-        <label>大きく表示するシート</label>
-        <div class="inline-add">
-          <select id="dsSheet" onchange="onPickSheet(this.value)">${sheets.map(x => `<option value="${esc(x.name)}"${x.name === pendingSheet ? ' selected' : ''}>${esc(x.name)}（${fmtNum(x.rows)}行×${x.cols}列）</option>`).join('')}</select>
-        </div>
-        <span class="form-hint" id="dsSheetHint"></span>
-      </div>` : ''}
-      <div class="form-row">
-        <label>カテゴリ</label>
-        <div class="inline-add"><select id="dsCat">${catOptions(d.categoryId || '', false)}</select><button type="button" onclick="quickAddCat('dsCat')">＋新規</button></div>
-      </div>
-      <div class="form-row"><label>メモ</label><textarea id="dsMemo">${esc(d.memo || '')}</textarea></div>
     </div>
     </div>
     ${multi ? `<div class="side-block">
@@ -1991,7 +1983,7 @@ async function handleReplaceFile(file) {
   const kind = kindOf(file.name);
   if (!kind) { toast('対応していない形式です', 'error'); return; }
   if (file.size > MAX_FILE_MB * 1024 * 1024) { toast(`${MAX_FILE_MB}MBを超えるファイルはアップできません`, 'error'); return; }
-  if (!confirm(`「${d.title}」のファイルを\n「${file.name}」に差し替えますか？\n\n前のファイルは置き換えられます（資料名・カテゴリ・メモ・ダウンロード履歴はそのまま残ります）。`)) return;
+  if (!confirm(`「${d.title}」のファイルを\n「${file.name}」に差し替えますか？\n\n前のファイルは置き換えられます（資料名・カテゴリ・ダウンロード履歴はそのまま残ります）。`)) return;
   const backup = JSON.parse(JSON.stringify({ path: d.path, sha: d.sha, size: d.size, ext: d.ext, kind: d.kind, originalName: d.originalName, summary: d.summary, searchText: d.searchText, preview: d.preview, updatedAt: d.updatedAt, updates: d.updates || [] }));
   showLoading('中身を読み取り中...');
   try {
@@ -2067,8 +2059,6 @@ async function handleDetailSave(closeAfter) {
   d.title = document.getElementById('dsTitle').value.trim() || d.originalName;
   d.categoryId = document.getElementById('dsCat').value || '';
   d.user = document.getElementById('dsUser').value || '';
-  d.orientation = document.getElementById('dsOri').value || '';
-  d.memo = document.getElementById('dsMemo').value.trim();
   d.updatedAt = new Date().toISOString();
   const savedSheet = (d.preview && d.preview.sheet) || '';
   const sheetChanged = !isMulti(d) && d.kind === 'excel' && pendingSheet && pendingSheet !== savedSheet;
@@ -2242,7 +2232,6 @@ function openUpload(files) {
   setUpType(upType);
   const t = document.getElementById('upTitle'); if (t) t.value = '';
   document.getElementById('upCat').innerHTML = catOptions(filterCat !== 'all' && filterCat !== 'none' ? filterCat : '', false);
-  document.getElementById('upMemo').value = '';
   renderUploads();
   showModal('uploadModal');
   if (files && files.length) addUploadFiles(files);
@@ -2327,7 +2316,7 @@ async function handleUpload() {
   if (!targets.length) return;
   if (state._loadFailed || state._wasEmpty) { toast('データの読み込みに失敗しているため保存できません。「🔄更新」してください', 'error'); return; }
   const categoryId = document.getElementById('upCat').value || '';
-  const memo = document.getElementById('upMemo').value.trim();
+  const memo = '';
   document.getElementById('upSaveBtn').disabled = true;
   if (upType === 'multi') return handleUploadMulti(targets, categoryId, memo);
   const added = [];
@@ -2354,7 +2343,6 @@ async function handleUpload() {
       const doc = {
         id, title: (u.title || '').trim() || u.file.name, originalName: u.file.name, ext: u.ext, kind: u.kind,
         path, sha, size: u.file.size, mime: u.file.type || '', categoryId, memo, preview,
-        orientation: ((u.analysis.summary.pdf || u.analysis.summary.image || {}).orientation) || '',
         createdAt: now, updatedAt: now, summary: u.analysis.summary, searchText: u.analysis.searchText
       };
       state.docs.push(doc); added.push(doc);
