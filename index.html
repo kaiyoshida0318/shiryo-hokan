@@ -252,7 +252,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .dropzone .dz-icon { font-size: 36px; }
 .dropzone .dz-title { font-weight: 600; margin-top: 6px; }
 .dropzone .dz-desc { font-size: 12px; color: var(--text-light); }
-.btn-cover { align-self: center; white-space: nowrap; padding: 6px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-muted); cursor: pointer; }
+.btn-cover { align-self: center; white-space: nowrap; padding: 6px 12px; font-size: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; line-height: 1.35; text-align: center; }
+.btn-cover .cb-name { display: block; }
+.btn-cover .cb-tag { display: block; font-size: 10px; font-weight: 700; }
 .btn-cover:hover { border-color: var(--primary); color: var(--primary-dark); }
 .btn-cover.on { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
 .up-cover { display: flex; gap: 14px; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 16px; background: var(--bg); }
@@ -557,7 +559,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.9.0';
+const APP_VERSION = 'v2.10.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1694,9 +1696,11 @@ function renderMultiTabs(d, idx) {
       const activeFid = src && src.fid ? src.fid : null;
       const chooser = `
         <div class="cover-bar">
-          <span class="cover-bar-label">🖼️ 表紙にするファイル</span>
-          ${imgs.map(f => `<button class="btn-cover ${activeFid === f.fid ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="${esc(f.title)}">${f.kind === 'pdf' ? '📕 ' : '🖼️ '}${esc(f.title.slice(0, 16))}</button>`).join('')}
-          ${(src && src.kind === 'cover') ? `<button class="btn-cover on">登録済みの表紙</button>` : ''}
+          ${imgs.map(f => `<button class="btn-cover ${activeFid === f.fid ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="${esc(f.title)}">
+              <span class="cb-name">${esc(f.title.slice(0, 20))}</span>
+              ${activeFid === f.fid ? '<span class="cb-tag">（表紙）</span>' : ''}
+            </button>`).join('')}
+          ${(src && src.kind === 'cover') ? `<button class="btn-cover on"><span class="cb-name">登録済みの表紙</span><span class="cb-tag">（表紙）</span></button>` : ''}
           ${imgs.length ? '' : '<span class="muted" style="font-size:12px">中に画像かPDFを追加すると、表紙に選べます</span>'}
           <span class="cover-bar-spacer"></span>
           ${url ? `<button class="btn-icon danger" onclick="removeCoverImage('${esc(d.id)}')">🗑️ 表紙を外す</button>` : ''}
@@ -1821,7 +1825,7 @@ function renderDetailSide(d) {
           <div class="file-icon ${f.kind}">${extLabel(f.ext)}</div>
           <input type="text" value="${esc(f.title)}" onchange="renameMember('${esc(d.id)}','${esc(f.fid)}',this.value)" title="ファイルの名前">
           <span class="fr-size">${fmtSize(f.size)}</span>
-          ${(f.kind === 'image' || f.kind === 'pdf') ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">表紙</button>` : ''}
+          ${(f.kind === 'image' || f.kind === 'pdf') ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">${(coverSource(d) && coverSource(d).fid === f.fid) ? '（表紙）' : '表紙にする'}</button>` : ''}
           <button onclick="_mTab(${i + 1})" title="開く">👁️</button>
           <button onclick="downloadMember(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="ダウンロード">⬇️</button>
           <button onclick="removeFileFromDoc(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="削除">🗑️</button>
