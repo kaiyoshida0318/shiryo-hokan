@@ -261,6 +261,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .side-edit { background: var(--bg); }
 .side-title { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
 .side-edit .form-row:last-of-type { margin-bottom: 16px; }
+.user-chip { font-size: 11px; padding: 2px 9px; border-radius: 12px; background: var(--word-bg); color: var(--word-text); font-weight: 500; white-space: nowrap; }
+.dl-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn-link { border: none; background: transparent; color: var(--primary-dark); font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit; }
+.dl-history { border-top: 1px dashed var(--border); margin-top: 12px; padding-top: 10px; max-height: 200px; overflow-y: auto; }
+.dl-row { font-size: 12px; color: var(--text-muted); padding: 3px 0; border-bottom: 1px solid var(--border-light); font-family: ui-monospace, monospace; }
 .pv-tmp { font-size: 10px; font-weight: 700; color: var(--warning-text); background: var(--warning-bg); padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
 .info-list { display: flex; flex-direction: column; gap: 9px; }
 .info-list dt { font-size: 11px; font-weight: 700; color: var(--text-light); }
@@ -348,6 +353,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <span class="app-version" id="appVersion"></span>
     <span class="conn-pill off" id="connPill">未接続</span>
     <button class="btn-icon" onclick="reloadFromGitHub()">🔄<span class="lbl">更新</span></button>
+    <button class="btn-icon" onclick="openFieldSettings()">🏷️<span class="lbl">項目設定</span></button>
     <button class="btn-icon" onclick="openSettings()">⚙️<span class="lbl">設定</span></button>
   </div>
 </header>
@@ -370,6 +376,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
       <button data-kind="excel" onclick="setKind('excel')">📗 Excel</button>
     </div>
     <select class="filter-select" id="catFilter" onchange="filterCat=this.value; renderDocs()"></select>
+    <select class="filter-select" id="userFilter" onchange="filterUser=this.value; renderDocs()"></select>
     <select class="filter-select" id="sortSel" onchange="sortKey=this.value; renderDocs()">
       <option value="new">新しい順</option>
       <option value="old">古い順</option>
@@ -472,6 +479,28 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   </div>
 </div>
 
+<!-- 項目設定モーダル -->
+<div class="modal-backdrop" id="fieldModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header"><h2>🏷️ 項目設定</h2><button class="btn-close" onclick="closeModal('fieldModal')">×</button></div>
+    <div class="modal-body">
+      <div class="side-title" style="margin-bottom:8px">メインの使用者（選べる名前）</div>
+      <div id="userList"></div>
+      <div class="inline-add" style="margin-top:10px">
+        <input type="text" id="newUser" placeholder="名前を追加（例: 佐藤）" onkeydown="if(event.key==='Enter')addUserOption()">
+        <button type="button" onclick="addUserOption()">＋追加</button>
+      </div>
+      <span class="form-hint">ここで追加した名前が、資料ごとの「メインの使用者」で選べるようになります。</span>
+      <div class="side-title" style="margin:20px 0 8px">PDFの向き</div>
+      <div class="form-hint" style="margin:0">「縦」「横」から選べます（資料の情報として記録されます）。</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-sub" onclick="closeModal('fieldModal')">閉じる</button>
+      <button class="btn-add" onclick="saveFieldSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- カテゴリ編集モーダル -->
 <div class="modal-backdrop" id="catModal">
   <div class="modal" style="max-width:460px">
@@ -491,7 +520,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.5.0';
+const APP_VERSION = 'v1.6.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -501,13 +530,16 @@ const PREVIEW_ROW_MAX = 500;     // Excelプレビュー(表)の最大行数
 const IMG_ROW_MAX = 60;          // プレビュー画像に描く最大行数
 const IMG_COL_MAX = 20;          // プレビュー画像に描く最大列数
 const MAX_FILE_MB = 50;
+const DL_HISTORY_MAX = 30;       // 残すダウンロード履歴の件数
+const DEFAULT_USERS = ['吉田', '高橋', '遠藤'];
+const ORIENTATIONS = ['縦', '横'];
 
 const KIND_BY_EXT = { docx: 'word', doc: 'word', xlsx: 'excel', xls: 'excel', xlsm: 'excel', csv: 'excel' };
 
 let auth = { pat: '', owner: '', repo: '', branch: 'main' };
-let state = { docs: [], categories: [], sha: null, _loadFailed: false, _wasEmpty: false };
+let state = { docs: [], categories: [], settings: { users: [...DEFAULT_USERS] }, sha: null, _loadFailed: false, _wasEmpty: false };
 let currentTab = 'docs';
-let filterKind = 'all', filterCat = 'all', searchText = '', sortKey = 'new', viewMode = 'card';
+let filterKind = 'all', filterCat = 'all', filterUser = 'all', searchText = '', sortKey = 'new', viewMode = 'card';
 let uploads = [];          // アップロード待ちファイル
 let editingCatId = null, detailId = null, pendingSheet = '';
 
@@ -547,7 +579,7 @@ async function fetchRepoFile(path) {
 async function loadRecords() {
   try {
     const res = await ghFetch(`contents/${DATA_PATH}?ref=${encodeURIComponent(auth.branch)}`);
-    if (res.status === 404) return { docs: [], categories: [], sha: null };
+    if (res.status === 404) return { docs: [], categories: [], settings: null, sha: null };
     if (!res.ok) return { docs: [], categories: [], sha: null, _loadFailed: true, _status: res.status };
     const meta = await res.json();
     const buf = await fetchRepoFile(DATA_PATH);
@@ -562,6 +594,7 @@ async function loadRecords() {
     return {
       docs: Array.isArray(json.docs) ? json.docs : [],
       categories: Array.isArray(json.categories) ? json.categories : [],
+      settings: (json.settings && typeof json.settings === 'object') ? json.settings : null,
       sha: meta.sha
     };
   } catch (e) {
@@ -574,7 +607,7 @@ async function saveData(message, retryCount = 0) {
   if (state._loadFailed || state._wasEmpty) {
     throw new Error('データの読み込みに失敗しているため、上書き保存を中止しました。「🔄更新」で再読み込みしてください。');
   }
-  const content = JSON.stringify({ version: APP_VERSION, updatedAt: new Date().toISOString(), docs: state.docs, categories: state.categories }, null, 1);
+  const content = JSON.stringify({ version: APP_VERSION, updatedAt: new Date().toISOString(), settings: state.settings, docs: state.docs, categories: state.categories }, null, 1);
   const body = { message: message || 'update data', content: b64encode(content), branch: auth.branch };
   if (state.sha) body.sha = state.sha;
   const res = await ghFetch(`contents/${DATA_PATH}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -1103,6 +1136,12 @@ function fmtDate(s) {
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+function fmtDateTime(s) {
+  if (!s) return '—';
+  const d = new Date(s); if (isNaN(d)) return s;
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 function fmtSize(b) {
   if (!b && b !== 0) return '';
   if (b < 1024) return b + ' B';
@@ -1137,7 +1176,8 @@ async function reloadFromGitHub() {
   showLoading('GitHubから読み込み中...');
   try {
     const r = await loadRecords();
-    state = { docs: r.docs, categories: r.categories, sha: r.sha, _loadFailed: !!r._loadFailed, _wasEmpty: !!r._wasEmpty };
+    const users = (r.settings && Array.isArray(r.settings.users)) ? r.settings.users : [...DEFAULT_USERS];
+    state = { docs: r.docs, categories: r.categories, settings: { users }, sha: r.sha, _loadFailed: !!r._loadFailed, _wasEmpty: !!r._wasEmpty };
     if (r._loadFailed) toast(`⚠️ 読み込みに失敗しました${r._status ? ` (status:${r._status})` : ''}。設定を確認してください`, 'error');
   } finally {
     hideLoading();
@@ -1178,10 +1218,13 @@ function renderCatFilter() {
   if (filterCat !== 'all' && filterCat !== 'none' && !state.categories.some(c => c.id === filterCat)) filterCat = 'all';
   document.getElementById('catFilter').innerHTML = catOptions(filterCat, true);
   document.getElementById('catFilter').value = filterCat;
+  const uf = document.getElementById('userFilter');
+  uf.innerHTML = userOptions(filterUser, true);
+  uf.value = filterUser;
 }
 
 function matchDoc(d, words) {
-  const hay = [d.title, d.originalName, (d.tags || []).join(' '), d.memo, catName(d.categoryId), d.searchText].join('\n').toLowerCase();
+  const hay = [d.title, d.originalName, (d.tags || []).join(' '), d.memo, catName(d.categoryId), d.user || '', d.searchText].join('\n').toLowerCase();
   return words.every(w => hay.includes(w));
 }
 function snippetOf(d, words) {
@@ -1201,6 +1244,7 @@ function filteredDocs() {
   let list = state.docs.filter(d =>
     (filterKind === 'all' || d.kind === filterKind) &&
     (filterCat === 'all' || (filterCat === 'none' ? !d.categoryId : d.categoryId === filterCat)) &&
+    (filterUser === 'all' || (filterUser === 'none' ? !d.user : d.user === filterUser)) &&
     (!words.length || matchDoc(d, words)));
   if (sortKey === 'new') list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   if (sortKey === 'old') list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
@@ -1259,16 +1303,17 @@ function renderDocs() {
     return;
   }
   if (viewMode === 'list') {
-    el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>種類</th><th>資料名</th><th>カテゴリ</th><th>中身の概要</th><th>ボリューム</th><th>サイズ</th><th>登録日</th></tr></thead><tbody>${
+    el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>種類</th><th>資料名</th><th>カテゴリ</th><th>使用者</th><th>向き</th><th>中身の概要</th><th>最終DL</th><th>登録日</th></tr></thead><tbody>${
       list.map(d => {
         const snip = words.length ? snippetOf(d, words) : '';
         return `<tr class="clickable" onclick="openDetail('${esc(d.id)}')">
           <td><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span></td>
           <td class="col-name">${highlight(d.title, searchText)}<div class="card-file">${esc(d.originalName)}</div>${(d.tags || []).length ? `<div class="chip-row" style="margin-top:4px">${d.tags.map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : ''}</td>
           <td class="nowrap">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : '<span class="muted">—</span>'}</td>
+          <td class="nowrap">${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : '<span class="muted">—</span>'}</td>
+          <td class="nowrap">${d.orientation ? esc(d.orientation) : '<span class="muted">—</span>'}</td>
           <td class="col-sum">${snip ? `<div class="snippet">${highlight(snip, searchText)}</div>` : listSummary(d)}</td>
-          <td class="nowrap">${metaCounts(d)}</td>
-          <td class="nowrap muted">${fmtSize(d.size)}</td>
+          <td class="nowrap muted">${d.lastDownloadAt ? `${fmtDate(d.lastDownloadAt)}<br><span class="muted">${(d.downloads || []).length}回</span>` : '—'}</td>
           <td class="nowrap muted">${fmtDate(d.createdAt)}</td>
         </tr>`;
       }).join('')
@@ -1284,7 +1329,7 @@ function renderDocs() {
       </div>
       ${d.preview ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
       <div class="card-body">
-        ${(d.categoryId || (d.tags || []).length) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${(d.tags || []).map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : ''}
+        ${(d.categoryId || d.user || d.orientation || (d.tags || []).length) ? `<div class="chip-row">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : ''}${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : ''}${d.orientation ? `<span class="tag-chip">📄 ${esc(d.orientation)}</span>` : ''}${(d.tags || []).map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : ''}
         ${snip ? `<div><div class="sum-label">一致した箇所</div><div class="snippet">${highlight(snip, searchText)}</div></div>` : summaryHtml(d, true)}
       </div>
       <div class="card-meta"><span>${metaCounts(d)} · ${fmtSize(d.size)}</span><span>${fmtDate(d.createdAt)}</span></div>
@@ -1397,11 +1442,22 @@ function renderDetailSide(d) {
         <div><dt>種類 / サイズ</dt><dd><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span> ${fmtSize(d.size)}</dd></div>
         <div><dt>ボリューム</dt><dd>${metaCounts(d)}${d.kind === 'word' && s.word && !s.word.unsupported ? `<br><span class="muted">段落 ${fmtNum(s.word.paragraphCount)} / 表 ${s.word.tableCount} / 画像 ${s.word.imageCount}</span>` : ''}</dd></div>
         <div><dt>登録日</dt><dd>${fmtDate(d.createdAt)}${d.updatedAt && d.updatedAt !== d.createdAt ? ` <span class="muted">（更新 ${fmtDate(d.updatedAt)}）</span>` : ''}</dd></div>
+        <div><dt>最終ダウンロード</dt><dd class="dl-line">
+          ${d.lastDownloadAt ? `<span>${fmtDateTime(d.lastDownloadAt)}</span><button class="btn-link" onclick="toggleDlHistory()">履歴 (${(d.downloads || []).length})</button>` : '<span class="muted">まだダウンロードされていません</span>'}
+        </dd></div>
       </dl>
+      <div class="dl-history" id="dlHistory" style="display:none">
+        <div class="side-title" style="margin-bottom:6px">ダウンロード履歴</div>
+        ${(d.downloads || []).slice().reverse().map(x => `<div class="dl-row"><span>${fmtDateTime(x.at)}</span></div>`).join('') || '<div class="muted">履歴はありません</div>'}
+      </div>
     </div>
     <div class="side-block side-edit">
       <div class="side-title">✏️ 編集</div>
       <div class="form-row"><label>資料名</label><input type="text" id="dsTitle" value="${esc(d.title)}"></div>
+      <div class="form-2col">
+        <div class="form-row"><label>メインの使用者</label><select id="dsUser">${userOptions(d.user || '', false)}</select></div>
+        <div class="form-row"><label>PDFの向き</label><select id="dsOri"><option value="">（未設定）</option>${ORIENTATIONS.map(o => `<option value="${o}"${d.orientation === o ? ' selected' : ''}>${o}</option>`).join('')}</select></div>
+      </div>
       ${(d.kind === 'excel' && sheets.length > 1) ? `
       <div class="form-row">
         <label>大きく表示するシート</label>
@@ -1419,6 +1475,7 @@ function renderDetailSide(d) {
       <button class="btn-add" style="width:100%" onclick="handleDetailSave()">保存</button>
     </div>`;
   const sel = document.getElementById('dsCat'); if (sel) sel.value = d.categoryId || '';
+  const us = document.getElementById('dsUser'); if (us) us.value = d.user || '';
 }
 
 // シート選択が変わったとき：その場で画像を作って左側に表示
@@ -1433,9 +1490,11 @@ function onPickSheet(name) {
 
 async function handleDetailSave() {
   const d = state.docs.find(x => x.id === detailId); if (!d) return;
-  const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, tags: d.tags, memo: d.memo, updatedAt: d.updatedAt }));
+  const backup = JSON.parse(JSON.stringify({ title: d.title, categoryId: d.categoryId, tags: d.tags, memo: d.memo, user: d.user || '', orientation: d.orientation || '', updatedAt: d.updatedAt }));
   d.title = document.getElementById('dsTitle').value.trim() || d.originalName;
   d.categoryId = document.getElementById('dsCat').value || '';
+  d.user = document.getElementById('dsUser').value || '';
+  d.orientation = document.getElementById('dsOri').value || '';
   d.tags = parseTags(document.getElementById('dsTags').value);
   d.memo = document.getElementById('dsMemo').value.trim();
   d.updatedAt = new Date().toISOString();
@@ -1562,6 +1621,10 @@ async function renderPreviewPane(d, body) {
   }
 }
 
+function toggleDlHistory() {
+  const el = document.getElementById('dlHistory');
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
 async function downloadDoc(id) {
   const d = state.docs.find(x => x.id === id); if (!d) return;
   showLoading('ダウンロード準備中...');
@@ -1572,6 +1635,14 @@ async function downloadDoc(id) {
     a.href = URL.createObjectURL(blob); a.download = d.originalName;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    // ダウンロード履歴を記録
+    const at = new Date().toISOString();
+    d.downloads = [...(d.downloads || []), { at }].slice(-DL_HISTORY_MAX);
+    d.lastDownloadAt = at;
+    try { await saveData(`download: ${d.originalName}`); }
+    catch (e) { toast('履歴の記録に失敗しました（ファイルは取得できています）', 'error'); }
+    renderAll();
+    if (detailId === d.id) renderDetailSide(d);
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoading(); }
 }
@@ -1773,6 +1844,46 @@ async function quickAddCat(selectId) {
   document.getElementById(selectId).innerHTML = catOptions(c.id, false);
   renderCatFilter();
   document.getElementById('cntCats').textContent = state.categories.length;
+}
+
+/* ==================== 項目設定（使用者リスト） ==================== */
+let userDraft = [];
+function openFieldSettings() {
+  userDraft = [...(state.settings.users || DEFAULT_USERS)];
+  renderUserList();
+  showModal('fieldModal');
+}
+function renderUserList() {
+  document.getElementById('userList').innerHTML = userDraft.length
+    ? userDraft.map((u, i) => `<div class="cat-manage-row"><input type="text" value="${esc(u)}" oninput="userDraft[${i}]=this.value">
+        <span class="cat-manage-count">${state.docs.filter(d => d.user === u).length} 件</span>
+        <button class="cat-manage-del" onclick="userDraft.splice(${i},1); renderUserList()">🗑️</button></div>`).join('')
+    : '<div class="cat-manage-empty">名前がまだありません</div>';
+}
+function addUserOption() {
+  const el = document.getElementById('newUser');
+  const v = el.value.trim();
+  if (!v) return;
+  if (userDraft.includes(v)) { toast('同じ名前があります', 'error'); return; }
+  userDraft.push(v); el.value = ''; renderUserList();
+}
+async function saveFieldSettings() {
+  const users = [...new Set(userDraft.map(u => u.trim()).filter(Boolean))];
+  const before = state.settings.users;
+  state.settings.users = users;
+  showLoading('保存中...');
+  try { await saveData('field settings'); closeModal('fieldModal'); toast('項目設定を保存しました', 'success'); }
+  catch (e) { state.settings.users = before; toast(e.message, 'error'); }
+  finally { hideLoading(); renderAll(); }
+}
+function userOptions(selected, withAll) {
+  const users = state.settings.users || [];
+  let h = withAll
+    ? `<option value="all">👤 すべての使用者</option><option value="none"${selected === 'none' ? ' selected' : ''}>（未設定）</option>`
+    : `<option value="">（未設定）</option>`;
+  h += users.map(u => `<option value="${esc(u)}"${u === selected ? ' selected' : ''}>${esc(u)}</option>`).join('');
+  if (selected && selected !== 'all' && selected !== 'none' && !users.includes(selected)) h += `<option value="${esc(selected)}" selected>${esc(selected)}</option>`;
+  return h;
 }
 
 /* ==================== ドラッグ＆ドロップ ==================== */
