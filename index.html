@@ -401,6 +401,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   .app-version { display: none; }
   .logo-img { height: 28px; }
   .conn-pill { max-width: 96px; }
+  .usage-pill { display: none; }
   .btn-icon { padding: 7px 9px; }
   .tab-bar { padding: 0 8px; top: 60px; }
   .toolbar { position: static; padding: 10px 12px; }
@@ -427,6 +428,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   <div class="header-spacer"></div>
   <div class="header-actions">
     <span class="app-version" id="appVersion"></span>
+    <span class="usage-pill" id="usagePill" onclick="openUsage()" title="保存している容量（クリックで内訳）">📦 —</span>
     <span class="conn-pill off" id="connPill">未接続</span>
     <button class="btn-icon" onclick="reloadFromGitHub()">🔄<span class="lbl">更新</span></button>
     <button class="btn-icon" onclick="openFieldSettings()">🏷️<span class="lbl">項目設定</span></button>
@@ -549,6 +551,15 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   </div>
 </div>
 
+<!-- 容量モーダル -->
+<div class="modal-backdrop" id="usageModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header"><h2>📦 保存している容量</h2><button class="btn-close" onclick="closeModal('usageModal')">×</button></div>
+    <div class="modal-body" id="usageBody"></div>
+    <div class="modal-actions"><button class="btn-sub" onclick="closeModal('usageModal')">閉じる</button></div>
+  </div>
+</div>
+
 <!-- 項目設定モーダル -->
 <div class="modal-backdrop" id="fieldModal">
   <div class="modal" style="max-width:520px">
@@ -580,7 +591,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.22.1';
+const APP_VERSION = 'v2.23.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -590,7 +601,7 @@ const SEARCH_TEXT_MAX = 20000;   // 検索用に保存する本文の最大文�
 const PREVIEW_ROW_MAX = 500;     // Excelプレビュー(表)の最大行数
 const IMG_ROW_MAX = 60;          // プレビュー画像に描く最大行数
 const IMG_COL_MAX = 20;          // プレビュー画像に描く最大列数
-const MAX_FILE_MB = 50;
+const MAX_FILE_MB = 90;   // GitHubの1ファイル上限(100MB)より少し手前
 const DL_HISTORY_MAX = 30;       // 残すダウンロード履歴の件数
 const DEFAULT_USERS = ['吉田', '高橋', '遠藤'];
 const ORIENTATIONS = ['縦', '横'];
@@ -735,7 +746,38 @@ function safeFilename(name) {
   const base = name.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|#%&{}$!'@`+=~^\[\]\s\u0000-\u001f]/g, '_').replace(/_+/g, '_').slice(0, 60) || 'file';
   return `${base}.${ext}`;
 }
+// 大きいファイルは Git Data API（blob→tree→commit）でアップロードする
+const BIG_FILE_MB = 4;
+async function ghJson(path, opts) {
+  const res = await ghFetch(path, opts);
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || `GitHub APIエラー (status:${res.status})`); }
+  return res.json();
+}
+async function uploadBigFile(path, file, message) {
+  return uploadBigContent(path, await fileToBase64(file), message || `upload: ${file.name}`);
+}
+async function uploadBigContent(path, content, message) {
+  const blob = await ghJson('git/blobs', { method: 'POST', body: JSON.stringify({ content, encoding: 'base64' }) });
+  const ref = await ghJson(`git/ref/heads/${encodeURIComponent(auth.branch)}`);
+  const head = ref.object.sha;
+  const commit = await ghJson(`git/commits/${head}`);
+  const tree = await ghJson('git/trees', {
+    method: 'POST',
+    body: JSON.stringify({ base_tree: commit.tree.sha, tree: [{ path, mode: '100644', type: 'blob', sha: blob.sha }] })
+  });
+  const newCommit = await ghJson('git/commits', {
+    method: 'POST',
+    body: JSON.stringify({ message: message || 'upload file', tree: tree.sha, parents: [head] })
+  });
+  await ghJson(`git/refs/heads/${encodeURIComponent(auth.branch)}`, { method: 'PATCH', body: JSON.stringify({ sha: newCommit.sha }) });
+  return blob.sha;
+}
+
 async function uploadFileToGitHub(path, file, existingSha) {
+  if (file.size > BIG_FILE_MB * 1024 * 1024) {
+    // 大きいファイルは最初から Git Data API で
+    return uploadBigFile(path, file);
+  }
   const content = await fileToBase64(file);
   const body = { message: `upload: ${file.name}`, content, branch: auth.branch };
   if (existingSha) body.sha = existingSha;
@@ -750,7 +792,11 @@ async function uploadFileToGitHub(path, file, existingSha) {
       }
     } catch (e) {}
   }
-  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || `アップロード失敗 (status:${res.status})`); }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    if (/too large/i.test(err.message || '')) return uploadBigFile(path, file);   // 念のためのフォールバック
+    throw new Error(err.message || `アップロード失敗 (status:${res.status})`);
+  }
   return (await res.json()).content.sha;
 }
 async function deleteFileFromGitHub(path, sha) {
@@ -1461,6 +1507,7 @@ let searchTimer = null;
 function onSearch(v) { clearTimeout(searchTimer); searchTimer = setTimeout(() => { searchText = v.trim(); renderDocs(); }, 150); }
 
 function renderAll() {
+  renderUsagePill();
   renderTabs();
   renderUserFilter();
   renderDocs();
@@ -2045,12 +2092,7 @@ async function handleReplaceFile(file) {
     showLoading('GitHubにアップロード中...');
     const newPath = `${DATA_DIR}/files/${d.id}/${safeFilename(file.name)}`;
     const existing = (newPath === d.path) ? d.sha : null;
-    const content = await fileToBase64(file);
-    const body = { message: `replace: ${file.name}`, content, branch: auth.branch };
-    if (existing) body.sha = existing;
-    const res = await ghFetch(`contents/${encPath(newPath)}`, { method: 'PUT', body: JSON.stringify(body) });
-    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || 'アップロードに失敗しました'); }
-    const newSha = (await res.json()).content.sha;
+    const newSha = await uploadFileToGitHub(newPath, file, existing);
     const oldPath = d.path, oldSha = d.sha;
     d.path = newPath; d.sha = newSha; d.size = file.size; d.ext = extOf(file.name); d.kind = kind;
     d.originalName = file.name; d.summary = analysis.summary; d.searchText = analysis.searchText;
@@ -2096,13 +2138,23 @@ async function renameStoredFile(d) {
   const newPath = `${DATA_DIR}/files/${d.id}/${safeFilename(newName)}`;
   if (newPath === d.path) { d.originalName = newName; return; }
   const buf = await getDocBuffer(d);
-  const res = await ghFetch(`contents/${encPath(newPath)}`, {
-    method: 'PUT',
-    body: JSON.stringify({ message: `rename: ${d.originalName} -> ${newName}`, content: bufToBase64(buf), branch: auth.branch })
-  });
-  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || 'ファイル名の変更に失敗しました'); }
+  const b64 = bufToBase64(buf);
   const oldPath = d.path, oldSha = d.sha;
-  d.path = newPath; d.sha = (await res.json()).content.sha; d.originalName = newName;
+  let newSha;
+  if (buf.byteLength > BIG_FILE_MB * 1024 * 1024) {
+    newSha = await uploadBigContent(newPath, b64, `rename: ${d.originalName} -> ${newName}`);
+  } else {
+    const res = await ghFetch(`contents/${encPath(newPath)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ message: `rename: ${d.originalName} -> ${newName}`, content: b64, branch: auth.branch })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (/too large/i.test(err.message || '')) newSha = await uploadBigContent(newPath, b64, `rename: ${newName}`);
+      else throw new Error(err.message || 'ファイル名の変更に失敗しました');
+    } else newSha = (await res.json()).content.sha;
+  }
+  d.path = newPath; d.sha = newSha; d.originalName = newName;
   if (d.preview && d.preview.self) { d.preview = { ...d.preview, path: d.path, sha: d.sha }; imgCache.delete(d.id); }
   await deleteFileFromGitHub(oldPath, oldSha);
 }
@@ -2297,7 +2349,7 @@ function addUploadFiles(fileList) {
     const kind = kindOf(f.name);
     const item = { key: uid('up'), file: f, kind, ext: extOf(f.name), title: f.name.replace(/\.[^.]+$/, ''), status: 'analyzing', error: '', analysis: null };
     if (!kind) { item.status = 'error'; item.error = '未対応の形式です（Word / Excel / PDF / 画像 / .ai / ZIP）'; }
-    else if (f.size > MAX_FILE_MB * 1024 * 1024) { item.status = 'error'; item.error = `${MAX_FILE_MB}MBを超えるファイルはアップできません`; }
+    else if (f.size > MAX_FILE_MB * 1024 * 1024) { item.status = 'error'; item.error = `${MAX_FILE_MB}MBを超えるファイルはアップできません（GitHubの上限）`; }
     uploads.push(item);
     if (item.status === 'analyzing') {
       analyzeFile(f).then(a => { item.analysis = a; item.status = 'ready'; }).catch(e => { item.status = 'error'; item.error = '読み取り失敗: ' + e.message; }).finally(renderUploads);
@@ -2713,6 +2765,50 @@ async function quickAddCat(selectId) {
   renderTabs();
 }
 
+/* ==================== 容量 ==================== */
+const REPO_SOFT_LIMIT = 1024 * 1024 * 1024;   // 1GB（GitHubの推奨上限）
+function usageStats() {
+  let total = 0, files = 0;
+  const byKind = {};
+  state.docs.forEach(d => {
+    const list = isMulti(d) ? (d.files || []) : [{ kind: d.kind, size: d.size }];
+    list.forEach(f => { total += f.size || 0; files++; byKind[f.kind] = (byKind[f.kind] || 0) + (f.size || 0); });
+  });
+  const top = state.docs.map(d => ({ title: d.title, size: docTotalSize(d) })).sort((a, b) => b.size - a.size).slice(0, 5);
+  return { total, files, docs: state.docs.length, byKind, top };
+}
+function renderUsagePill() {
+  const el = document.getElementById('usagePill');
+  if (!el) return;
+  if (!auth.owner || !auth.repo) { el.textContent = '📦 —'; el.className = 'usage-pill'; return; }
+  const u = usageStats();
+  el.textContent = `📦 ${fmtSize(u.total)}`;
+  el.className = 'usage-pill' + (u.total > REPO_SOFT_LIMIT * 0.8 ? ' warn' : '');
+  el.title = `資料 ${u.docs} 件 / ファイル ${u.files} 個 ・ 合計 ${fmtSize(u.total)}（クリックで内訳）`;
+}
+function openUsage() {
+  const u = usageStats();
+  const pct = Math.min(100, Math.round(u.total / REPO_SOFT_LIMIT * 100));
+  const kindName = { word: 'Word', excel: 'Excel', pdf: 'PDF', image: '画像', ai: 'Illustrator', zip: 'ZIP' };
+  document.getElementById('usageBody').innerHTML = `
+    <div class="stat-row">
+      <div class="stat"><div class="v">${fmtSize(u.total)}</div><div class="k">合計</div></div>
+      <div class="stat"><div class="v">${fmtNum(u.docs)}</div><div class="k">資料</div></div>
+      <div class="stat"><div class="v">${fmtNum(u.files)}</div><div class="k">ファイル</div></div>
+    </div>
+    <div class="usage-bar"><span style="width:${pct}%"></span></div>
+    <div class="form-hint" style="margin-bottom:16px">GitHubのおすすめ上限 1GB に対して <b>${pct}%</b> です（${fmtSize(u.total)} / 1.0 GB）。1GBを超えても使えますが、動作が重くなることがあります。</div>
+    <div class="side-title">種類ごと</div>
+    <div class="tbl-wrap" style="margin-bottom:16px"><table class="tbl"><tbody>
+      ${Object.entries(u.byKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${kindName[k] || k}</td><td class="nowrap">${fmtSize(v)}</td></tr>`).join('') || '<tr><td class="muted">まだありません</td></tr>'}
+    </tbody></table></div>
+    <div class="side-title">大きい資料 トップ5</div>
+    <div class="tbl-wrap"><table class="tbl"><tbody>
+      ${u.top.map(t => `<tr><td>${esc(t.title)}</td><td class="nowrap">${fmtSize(t.size)}</td></tr>`).join('') || '<tr><td class="muted">まだありません</td></tr>'}
+    </tbody></table></div>`;
+  showModal('usageModal');
+}
+
 /* ==================== 項目設定（使用者リスト） ==================== */
 let userDraft = [], catDraft = [];
 function openFieldSettings(focus) {
@@ -2811,7 +2907,7 @@ function userOptions(selected, withAll) {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  for (const id of ['catModal', 'settingsModal', 'uploadModal', 'detailModal']) {
+  for (const id of ['usageModal', 'fieldModal', 'catModal', 'settingsModal', 'uploadModal', 'detailModal']) {
     const m = document.getElementById(id);
     if (m.classList.contains('show')) { id === 'uploadModal' ? closeUpload() : closeModal(id); break; }
   }
