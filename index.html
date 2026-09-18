@@ -258,6 +258,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .detail { display: grid; grid-template-columns: minmax(0,1fr) 560px; gap: 18px; height: 100%; min-height: 0; }
 .detail-side { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding-right: 2px; }
 .side-top { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.side-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .replace-zone { border: 2px dashed var(--border); border-radius: var(--radius); background: var(--bg); padding: 20px 16px; text-align: center; cursor: pointer; transition: all .15s; }
 .replace-zone:hover, .replace-zone.over { border-color: var(--primary); background: var(--primary-light); }
 .replace-zone .rz-icon { font-size: 30px; }
@@ -529,7 +530,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v1.8.0';
+const APP_VERSION = 'v1.9.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1283,6 +1284,7 @@ function summaryHtml(d, compact) {
     return h || `<div class="sum-excerpt muted">本文なし</div>`;
   }
   if (d.kind === 'excel') {
+    if (compact) return '';            // 一覧ではシート名・項目は出さない（画像で見せる）
     const sheets = (s.excel && s.excel.sheets) || [];
     const vis = sheets.filter(x => !x.hidden);
     const main = [...vis].sort((a, b) => b.rows - a.rows)[0];
@@ -1325,7 +1327,7 @@ function renderDocs() {
         const snip = words.length ? snippetOf(d, words) : '';
         return `<tr class="clickable" onclick="openDetail('${esc(d.id)}')">
           <td><span class="kind-badge ${d.kind}">${extLabel(d.ext)}</span></td>
-          <td class="col-name">${highlight(d.title, searchText)}<div class="card-file">${esc(d.originalName)}</div>${(d.tags || []).length ? `<div class="chip-row" style="margin-top:4px">${d.tags.map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : ''}</td>
+          <td class="col-name">${highlight(d.title, searchText)}${(d.tags || []).length ? `<div class="chip-row" style="margin-top:4px">${d.tags.map(t => `<span class="tag-chip">#${esc(t)}</span>`).join('')}</div>` : ''}</td>
           <td class="nowrap">${d.categoryId ? `<span class="cat-chip">${esc(catName(d.categoryId))}</span>` : '<span class="muted">—</span>'}</td>
           <td class="nowrap">${d.user ? `<span class="user-chip">👤 ${esc(d.user)}</span>` : '<span class="muted">—</span>'}</td>
           <td class="nowrap">${d.orientation ? esc(d.orientation) : '<span class="muted">—</span>'}</td>
@@ -1342,7 +1344,7 @@ function renderDocs() {
     return `<div class="card ${d.kind}" onclick="openDetail('${esc(d.id)}')">
       <div class="card-head">
         <div class="file-icon ${d.kind}">${extLabel(d.ext)}</div>
-        <div class="card-titles"><div class="card-name">${highlight(d.title, searchText)}</div><div class="card-file" title="${esc(d.originalName)}">${esc(d.originalName)}</div></div>
+        <div class="card-titles"><div class="card-name">${highlight(d.title, searchText)}</div></div>
       </div>
       ${d.preview ? `<div class="card-thumb" data-id="${esc(d.id)}"></div>` : ''}
       <div class="card-body">
@@ -1362,8 +1364,7 @@ function listSummary(d) {
     const hs = (w.headings || []).filter(x => x.level <= 2).slice(0, 4).map(x => esc(x.text));
     return hs.length ? `<b>見出し:</b> ${hs.join(' ／ ')}` : esc((w.excerpt || '').slice(0, 120));
   }
-  const sh = (s.excel && s.excel.sheets) || [];
-  return sh.slice(0, 5).map(x => `<b>${esc(x.name)}</b>（${x.header.filter(Boolean).slice(0, 5).map(esc).join('・') || '—'}）`).join('<br>');
+  return '<span class="muted">—</span>';   // Excelはシート名・項目を出さない
 }
 
 /* ==================== プレビュー画像 ==================== */
@@ -1450,6 +1451,7 @@ function renderDetailSide(d) {
   const sheets = (s.excel && s.excel.sheets) || [];
   document.getElementById('detailSide').innerHTML = `
     <div class="side-top">
+    <div class="side-col">
     <div class="side-block">
       <div class="side-actions">
         <button class="btn-icon" onclick="downloadDoc('${esc(d.id)}')">⬇️ ダウンロード</button>
@@ -1468,6 +1470,17 @@ function renderDetailSide(d) {
         <div class="side-title" style="margin-bottom:6px">ダウンロード履歴</div>
         ${(d.downloads || []).slice().reverse().map(x => `<div class="dl-row"><span>${fmtDateTime(x.at)}</span></div>`).join('') || '<div class="muted">履歴はありません</div>'}
       </div>
+    </div>
+    <div class="side-block">
+      <div class="side-title">🔄 ファイルの差し替え（更新）</div>
+      <div class="replace-zone" id="replaceZone" onclick="document.getElementById('replaceInput').click()">
+        <div class="rz-icon">📥</div>
+        <div class="rz-title">新しいファイルをドラッグ＆ドロップ</div>
+        <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・タグ・メモ・履歴はそのまま引き継ぎます</div>
+      </div>
+      <input type="file" id="replaceInput" accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
+      ${(d.updates || []).length ? `<div class="dl-history" style="max-height:120px">${d.updates.slice().reverse().map(x => `<div class="dl-row">${fmtDateTime(x.at)} ${esc(x.name || '')}</div>`).join('')}</div>` : ''}
+    </div>
     </div>
     <div class="side-block side-edit">
       <div class="side-title">✏️ 編集</div>
@@ -1497,16 +1510,6 @@ function renderDetailSide(d) {
       <div class="form-row"><label>メモ</label><textarea id="dsMemo">${esc(d.memo || '')}</textarea></div>
       <button class="btn-add" style="width:100%" onclick="handleDetailSave()">保存</button>
     </div>
-    </div>
-    <div class="side-block">
-      <div class="side-title">🔄 ファイルの差し替え（更新）</div>
-      <div class="replace-zone" id="replaceZone" onclick="document.getElementById('replaceInput').click()">
-        <div class="rz-icon">📥</div>
-        <div class="rz-title">新しいファイルをドラッグ＆ドロップ</div>
-        <div class="rz-desc">クリックして選ぶこともできます<br>中身とプレビュー画像を作り直し、資料名・カテゴリ・タグ・メモ・履歴はそのまま引き継ぎます</div>
-      </div>
-      <input type="file" id="replaceInput" accept=".docx,.doc,.xlsx,.xls,.xlsm,.csv" style="display:none" onchange="if(this.files[0])handleReplaceFile(this.files[0]); this.value=''">
-      ${(d.updates || []).length ? `<div class="dl-history" style="max-height:120px">${d.updates.slice().reverse().map(x => `<div class="dl-row">${fmtDateTime(x.at)} ${esc(x.name || '')}</div>`).join('')}</div>` : ''}
     </div>`;
   const sel = document.getElementById('dsCat'); if (sel) sel.value = d.categoryId || '';
   const us = document.getElementById('dsUser'); if (us) us.value = d.user || '';
