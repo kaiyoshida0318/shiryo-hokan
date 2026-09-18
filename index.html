@@ -126,7 +126,8 @@ button { font-family: inherit; }
 .seg button.active[data-kind="excel"] { background: var(--excel); }
 .seg button.active[data-kind="pdf"] { background: var(--fail); }
 .seg button.active[data-kind="image"] { background: #7c3aed; }
-.seg button.active[data-kind="other"] { background: #4b5563; }
+.seg button.active[data-kind="ai"] { background: #ea580c; }
+.seg button.active[data-kind="zip"] { background: #6b7280; }
 .filter-select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 13px; color: var(--text); max-width: 200px; cursor: pointer; font-family: inherit; }
 .toolbar-spacer { flex: 1; }
 .result-count { font-size: 12px; color: var(--text-light); white-space: nowrap; }
@@ -302,8 +303,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cover-bar-label { font-size: 12px; font-weight: 700; color: var(--text-muted); }
 .cover-bar-spacer { flex: 1; }
 .cover-box img { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
-.file-row { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-light); }
-.fr-actions { grid-column: 2 / -1; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.file-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-light); }
+.fr-actions { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+.fr-kind { font-size: 10px; font-weight: 700; font-family: ui-monospace, monospace; padding: 2px 7px; border-radius: 8px; margin-right: auto; }
 .file-row .file-icon { width: 34px; height: 34px; font-size: 10px; }
 .file-row input { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
 .file-row .fr-size { font-size: 11px; color: var(--text-light); white-space: nowrap; font-family: ui-monospace, monospace; }
@@ -439,7 +441,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
       <button data-kind="excel" onclick="setKind('excel')">📗 Excel</button>
       <button data-kind="pdf" onclick="setKind('pdf')">📕 PDF</button>
       <button data-kind="image" onclick="setKind('image')">🖼️ 画像</button>
-      <button data-kind="other" onclick="setKind('other')">🗜️ その他</button>
+      <button data-kind="ai" onclick="setKind('ai')">🎨 ai</button>
+      <button data-kind="zip" onclick="setKind('zip')">🗜️ ZIP</button>
     </div>
     <select class="filter-select" id="userFilter" onchange="filterUser=this.value; renderDocs()"></select>
     <select class="filter-select" id="sortSel" onchange="sortKey=this.value; renderDocs()">
@@ -572,7 +575,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.14.0';
+const APP_VERSION = 'v2.15.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1436,7 +1439,7 @@ function catOptions(selected, withAll) {
   return h;
 }
 
-function matchKind(x, k) { return k === 'other' ? (x.kind === 'ai' || x.kind === 'zip') : x.kind === k; }
+function matchKind(x, k) { return k === 'ai' ? (x.kind === 'ai') : x.kind === k; }
 function matchDoc(d, words) {
   const parts = [d.title, d.memo, catName(d.categoryId), d.user || ''];
   if (isMulti(d)) (d.files || []).forEach(f => parts.push(f.title, f.originalName, f.searchText));
@@ -1947,10 +1950,10 @@ function renderDetailSide(d) {
       </div>
       ${(d.files || []).map((f, i) => `
         <div class="file-row">
-          <div class="file-icon ${f.kind}">${extLabel(f.ext)}</div>
           <input type="text" value="${esc(f.title)}" onchange="renameMember('${esc(d.id)}','${esc(f.fid)}',this.value)" title="ファイルの名前">
           <span class="fr-size">${fmtSize(f.size)}</span>
           <div class="fr-actions">
+            <span class="fr-kind kind-badge ${f.kind}">${extLabel(f.ext)}</span>
             ${(f.kind === 'image' || f.kind === 'pdf') ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">${(coverSource(d) && coverSource(d).fid === f.fid) ? '（表紙）' : '表紙にする'}</button>` : ''}
             <button class="fr-move" onclick="moveMember('${esc(d.id)}','${esc(f.fid)}',-1)" ${i === 0 ? 'disabled' : ''} title="上へ">↑</button>
             <button class="fr-move" onclick="moveMember('${esc(d.id)}','${esc(f.fid)}',1)" ${i === (d.files || []).length - 1 ? 'disabled' : ''} title="下へ">↓</button>
