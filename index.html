@@ -557,7 +557,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 <div class="loading" id="loading"><div class="spinner"></div><div class="loading-text" id="loadingText">読み込み中...</div></div>
 
 <script>
-const APP_VERSION = 'v2.7.0';
+const APP_VERSION = 'v2.8.0';
 const DATA_DIR = 'shiryo-data';
 const DATA_PATH = `${DATA_DIR}/records.json`;
 const LS_AUTH = 'shiryoHokan.auth';
@@ -1694,20 +1694,19 @@ function renderMultiTabs(d, idx) {
       const activeFid = src && src.kind === 'member' ? src.fid : null;
       const chooser = `
         <div class="cover-bar">
-          <span class="cover-bar-label">🖼️ 表紙</span>
-          ${imgs.map(f => `<button class="btn-cover ${activeFid === f.fid ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="${esc(f.title)}">${esc(f.title.slice(0, 14))}</button>`).join('')}
-          ${(src && src.kind === 'cover') ? `<button class="btn-cover on">アップした画像</button>` : ''}
+          <span class="cover-bar-label">🖼️ 表紙にする画像</span>
+          ${imgs.map(f => `<button class="btn-cover ${activeFid === f.fid ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="${esc(f.title)}">${activeFid === f.fid ? '🖼️ ' : ''}${esc(f.title.slice(0, 16))}</button>`).join('')}
+          ${(src && src.kind === 'cover') ? `<button class="btn-cover on">登録済みの表紙</button>` : ''}
+          ${imgs.length ? '' : '<span class="muted" style="font-size:12px">中に画像ファイルを追加すると、表紙に選べます</span>'}
           <span class="cover-bar-spacer"></span>
           ${url ? `<button class="btn-icon danger" onclick="removeCoverImage('${esc(d.id)}')">🗑️ 表紙を外す</button>` : ''}
-          <button class="btn-icon" onclick="document.getElementById('coverInput').click()">📤 表紙にする画像を登録</button>
-        </div>
-        <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="if(this.files[0])setCoverImage(state.docs.find(x=>x.id==='${esc(d.id)}'), this.files[0]); this.value=''">`;
+        </div>`;
       box.innerHTML = chooser + (url
         ? `<img src="${url}" alt="表紙">`
-        : `<div class="replace-zone" style="padding:60px 20px" onclick="document.getElementById('coverInput').click()">
+        : `<div class="replace-zone" style="padding:60px 20px" onclick="document.getElementById('replaceInput').click()">
              <div class="rz-icon">🖼️</div>
              <div class="rz-title">表紙にする画像がありません</div>
-             <div class="rz-desc">クリックして選択／ここに画像をドラッグ＆ドロップ<br>中に画像ファイルを入れると、その画像も表紙に選べます</div>
+             <div class="rz-desc">画像ファイル（JPG / PNG など）をこの資料に追加すると、上のボタンから表紙に選べます</div>
            </div>`);
     })();
     return;
@@ -1822,6 +1821,7 @@ function renderDetailSide(d) {
           <div class="file-icon ${f.kind}">${extLabel(f.ext)}</div>
           <input type="text" value="${esc(f.title)}" onchange="renameMember('${esc(d.id)}','${esc(f.fid)}',this.value)" title="ファイルの名前">
           <span class="fr-size">${fmtSize(f.size)}</span>
+          ${f.kind === 'image' ? `<button class="btn-cover ${(coverSource(d) && coverSource(d).fid === f.fid) ? 'on' : ''}" onclick="pickCoverMember('${esc(d.id)}','${esc(f.fid)}')" title="表紙にする">表紙</button>` : ''}
           <button onclick="_mTab(${i + 1})" title="開く">👁️</button>
           <button onclick="downloadMember(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="ダウンロード">⬇️</button>
           <button onclick="removeFileFromDoc(state.docs.find(x=>x.id==='${esc(d.id)}'),'${esc(f.fid)}')" title="削除">🗑️</button>
@@ -2095,7 +2095,7 @@ function setUpType(t) {
   document.querySelectorAll('#upTypeSeg button').forEach(b => b.classList.toggle('active', b.dataset.t === t));
   document.getElementById('upTitleRow').style.display = t === 'multi' ? '' : 'none';
   document.getElementById('dzHint').innerHTML = t === 'multi'
-    ? '複数資料：選んだファイルは<b>1つの資料</b>にまとまります。画像を入れたら、下の一覧で「表紙にする」を選べます'
+    ? '複数資料：選んだファイルは<b>1つの資料</b>にまとまります。画像を入れたら、下の一覧で「表紙にする」を選べます（あとから変えられます）'
     : '単一資料：ファイル1つにつき1件の資料として登録します';
   renderUploads();
 }
@@ -2178,7 +2178,7 @@ function renderUploads() {
   const busy = uploads.some(u => u.status === 'analyzing' || u.status === 'uploading');
   document.getElementById('upSummary').textContent = uploads.length
     ? (upType === 'multi'
-        ? `1つの資料に ${ready - (coverCandidate() ? 1 : 0)} ファイル${coverCandidate() ? '＋表紙1枚' : ''}${busy ? '（処理中…）' : ''}`
+        ? `1つの資料に ${ready} ファイル${coverCandidate() ? '（うち1枚を表紙に）' : ''}${busy ? '（処理中…）' : ''}`
         : `保存できる資料 ${ready} 件${busy ? '（処理中…）' : ''}`)
     : '';
   document.getElementById('upSaveBtn').disabled = !ready || busy;
@@ -2246,24 +2246,16 @@ async function handleUploadMulti(targets, categoryId, memo) {
   const title = (document.getElementById('upTitle').value || '').trim() || (targets[0].title || '新しい資料');
   const coverFile = coverCandidate();
   const files = [];
-  let cover = null;
-  if (coverFile) {
-    try {
-      showLoading('表紙画像をアップロード中...');
-      const cpath = `${DATA_DIR}/covers/${id}_${Date.now()}.${extOf(coverFile.name) || 'png'}`;
-      const csha = await uploadFileToGitHub(cpath, coverFile);
-      cover = { path: cpath, sha: csha, mime: coverFile.type };
-    } catch (e) { toast('表紙画像のアップロードに失敗しました', 'error'); }
-    finally { hideLoading(); }
-  }
+  let coverFid = '';
   for (const u of targets) {
-    if (coverFile && u.file === coverFile) { u.status = 'done'; renderUploads(); continue; }
     u.status = 'uploading'; renderUploads();
     try {
       const path = `${DATA_DIR}/files/${id}/${safeFilename(u.file.name)}`;
       const sha = await uploadFileToGitHub(path, u.file);
+      const fid = uid('f');
+      if (coverFile && u.file === coverFile) coverFid = fid;
       files.push({
-        fid: uid('f'), title: (u.title || '').trim() || u.file.name, originalName: u.file.name,
+        fid, title: (u.title || '').trim() || u.file.name, originalName: u.file.name,
         ext: u.ext, kind: u.kind, path, sha, size: u.file.size,
         summary: u.analysis.summary, searchText: u.analysis.searchText, createdAt: new Date().toISOString()
       });
@@ -2271,8 +2263,8 @@ async function handleUploadMulti(targets, categoryId, memo) {
     } catch (e) { u.status = 'error'; u.error = 'アップロード失敗: ' + e.message; }
     renderUploads();
   }
-  if (!files.length && !cover) { document.getElementById('upSaveBtn').disabled = false; return; }
-  const doc = { id, type: 'multi', title, categoryId, memo, user: '', orientation: '', cover, files,
+  if (!files.length) { document.getElementById('upSaveBtn').disabled = false; return; }
+  const doc = { id, type: 'multi', title, categoryId, memo, user: '', orientation: '', cover: null, coverFid: noCover ? 'none' : coverFid, files,
     createdAt: now, updatedAt: now, downloads: [], lastDownloadAt: null };
   state.docs.push(doc);
   showLoading('一覧データを保存中...');
@@ -2286,7 +2278,6 @@ async function handleUploadMulti(targets, categoryId, memo) {
     toast('保存に失敗: ' + e.message, 'error');
     state.docs = state.docs.filter(x => x !== doc);
     for (const f of files) await deleteFileFromGitHub(f.path, f.sha);
-    if (cover) await deleteFileFromGitHub(cover.path, cover.sha);
     renderAll();
   } finally { hideLoading(); }
 }
@@ -2344,26 +2335,6 @@ async function pickCoverMember(docId, fid) {
   clearCoverCache(d);
   toast('表紙を変えました', 'success');
   renderAll(); if (detailId === d.id) renderMultiTabs(d, 0);
-}
-async function setCoverImage(d, file) {
-  if (!/^image\//.test(file.type)) { toast('画像ファイル（JPG / PNG など）を選んでください', 'error'); return; }
-  if (file.size > 10 * 1024 * 1024) { toast('表紙画像は10MBまでにしてください', 'error'); return; }
-  showLoading('表紙画像をアップロード中...');
-  const before = d.cover;
-  try {
-    const ext = (extOf(file.name) || 'png');
-    const path = `${DATA_DIR}/covers/${d.id}_${Date.now()}.${ext}`;
-    const sha = await uploadFileToGitHub(path, file);
-    d.cover = { path, sha, mime: file.type };
-    d.coverFid = '';
-    d.updatedAt = new Date().toISOString();
-    clearCoverCache(d);
-    await saveData(`cover: ${d.title}`);
-    if (before) await deleteFileFromGitHub(before.path, before.sha);
-    toast('表紙画像を登録しました', 'success');
-    renderAll(); if (detailId === d.id) { renderMultiTabs(d, 0); renderDetailSide(d); }
-  } catch (e) { d.cover = before; toast(e.message, 'error'); }
-  finally { hideLoading(); }
 }
 async function removeCoverImage(docId) {
   const d = state.docs.find(x => x.id === docId); if (!d) return;
